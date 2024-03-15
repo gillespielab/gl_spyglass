@@ -137,7 +137,7 @@ def get_sc_descriptors(sc_text):
             else:
                 descriptors['outer_reps'] = int(line[line.index('=') + 1:].strip())
         elif re.match(r'^(numgoals\s*=?).*', line):
-            descriptors['num__goals'] = int(line[line.index('=') + 1:].strip())
+            descriptors['num_goals'] = int(line[line.index('=') + 1:].strip())
         elif re.match(r'^(forageNum\s*=?).*', line):
             descriptors['forage_num'] = int(line[line.index('=') + 1:].strip())
 
