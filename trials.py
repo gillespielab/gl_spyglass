@@ -11,6 +11,7 @@ from utils.parse_trials_helper import V8TrialParser
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import re
 
 schema = dj.schema("TrialsInfo")
 
@@ -62,8 +63,6 @@ class TrialInfo(dj.Computed):
             logger.info(f"No home dio events detected for epoch {epoch_name}")
             return
 
-        # get and parse trials from each statescript
-
         associated_files = nwbf.processing.get("associated_files")
         if associated_files is None:
             logger.info(f"No associated files found for {epoch_name}")
@@ -72,6 +71,9 @@ class TrialInfo(dj.Computed):
         # get and parse trials from each statescript
         file_id = (StateScriptFile & key).fetch1("file_object_id")
         sc = nwbf.objects[file_id]
+
+        # TODO: get descriptors from statescript
+        key["descriptors"] = get_sc_descriptors(sc.content)
 
         # parse statescript according to the task type (currently there's only the V8, but future variants will be added here)
         task_name = (TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("task_name")
@@ -101,3 +103,42 @@ class TrialInfo(dj.Computed):
             analysis_file_name=key["analysis_file_name"],
         )
         self.insert1(key)
+
+
+def get_sc_descriptors(sc_text):
+    '''
+    Helper method to retrieve key descriptors from the statescript log. 
+
+    sc_text: str    # text contents of statescript file
+    '''
+    descriptors = {}
+
+    sc_lines = sc_text.split("\n")
+
+    lines = [line[1:] for line in sc_lines if len(line) > 0 and line[0]=='#']
+
+    for line in lines:
+        if '%' in line:
+            line = line[:line.index('%')].strip() # strip comments
+
+        if re.match(r'<.*_uw\.sc>$', line): # get statescript file name
+            descriptors["statescript"] = line[1:-1]
+            #print(line[1:-1])
+        elif re.match(r'<.*\.py>$', line): # get python script file name
+            descriptors["python_script"] = line[1:-1]
+            #print(line[1:-1])
+        elif re.match(r'^(int lockoutPeriod\s*=?).*', line): # get lockout period length (in seconds)
+            descriptors["lockout_period"] = int(line[line.index('=') + 1 : ].strip()) / 1000
+        elif re.match(r'^(outerReps\s*=?).*', line):
+            if "np.random.randint" in line:
+                rangestr = line[line.index('(') + 1 : line.index(')') + 1]
+                range = rangestr.split(',')
+                descriptors['outer_reps'] = [int(range[0]), int(range[1])]
+            else:
+                descriptors['outer_reps'] = int(line[line.index('=') + 1:].strip())
+        elif re.match(r'^(numgoals\s*=?).*', line):
+            descriptors['num__goals'] = int(line[line.index('=') + 1:].strip())
+        elif re.match(r'^(forageNum\s*=?).*', line):
+            descriptors['forage_num'] = int(line[line.index('=') + 1:].strip())
+
+    return descriptors
