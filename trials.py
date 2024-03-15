@@ -3,6 +3,7 @@ from spyglass.utils import logger
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_behav import StateScriptFile
 from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_session import Session
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -72,7 +73,7 @@ class TrialInfo(dj.Computed):
         file_id = (StateScriptFile & key).fetch1("file_object_id")
         sc = nwbf.objects[file_id]
 
-        # TODO: get descriptors from statescript
+        # get descriptors from statescript
         key["descriptors"] = get_sc_descriptors(sc.content)
 
         # parse statescript according to the task type (currently there's only the V8, but future variants will be added here)
@@ -89,20 +90,59 @@ class TrialInfo(dj.Computed):
 
         trials_df = parser.parse_trials()
 
-        # set trial descriptors using statescript
-
         # Insert into analysis nwb file
+        session = (Session & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("session_id")
+        epoch_num = key["epoch"]
         nwb_analysis_file = AnalysisNwbfile()
         key["analysis_file_name"] = nwb_analysis_file.create(key['nwb_file_name'])
         key["trial_info_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
-            nwb_object=trials_df,
+            nwb_object=trials_df, # TODO add custom table name, as it defaults to "pandas_table"
+            table_name=f"Trials dataframe for {session}, epoch {epoch_num}"
         )
         nwb_analysis_file.add(
             nwb_file_name=nwb_file_name,
             analysis_file_name=key["analysis_file_name"],
         )
         self.insert1(key)
+    
+    def fetch1_dataframe(self):
+        '''
+        Fetch the trial-by-trial analysis dataframe for a given epoch on a given day. 
+        Only valid when a single epoch is selected.
+
+        Example:
+        restr = {"nwb_file_name": "bobrick20231114_.nwb", "epoch": 4}
+        (TrialInfo & restr).fetch1_dataframe()
+        '''
+        
+        filename = self.fetch1("analysis_file_name")
+        obj_id = self.fetch1("trial_info_object_id")
+        filepath = (AnalysisNwbfile & {"analysis_file_name" : filename}).fetch1("analysis_file_abs_path")
+        nwbfile = get_nwb_file(filepath)
+        trials_df = nwbfile.objects[obj_id]
+        return trials_df
+    
+    def plot_trials(self):
+        '''
+        Visualize behavioral landmark information for a given epoch on a given day. 
+        Only valid when a single epoch is selected.
+        Top plot: timestamps when certain landmarks were triggered
+        Bottom plot: history of outerwells visited
+
+        Example:
+        restr = {"nwb_file_name": "bobrick20231114_.nwb", "epoch": 4}
+        (TrialInfo & restr).plot_trials()
+        '''
+        trials_df = self.fetch1_dataframe()
+        session = (Session & self).fetch1("session_id")
+        epoch = self.fetch1("epoch")
+        task_name = (TaskEpoch & self).fetch1("task_name")
+        if task_name == 'Eight arm flexible spatial task':
+            V8TrialParser.plot_trials(trials_df, session, epoch)
+        else:
+            print(f"No parsing logic implemented for task: {task_name}")
+
 
 
 def get_sc_descriptors(sc_text):

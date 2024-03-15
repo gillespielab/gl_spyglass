@@ -53,7 +53,7 @@ class V8TrialParser(TrialParser):
         return events_df
 
     @staticmethod
-    def plot_trials(df, desc, return_fig=False):
+    def plot_trials(df, session, epoch_num, return_fig=False):
         
         trialtype = df['trial_type'][:]
         RWstart = df['rw_start'][:]
@@ -95,8 +95,6 @@ class V8TrialParser(TrialParser):
         ax2.plot(outertime[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], 'mo')
         ax2.plot(df['leave_outer'], df['outer_well'], 'm.')
         ax2.legend(['goal well arms', 'non-goal well arms'])
-        session = desc['nwb_file_name']
-        epoch_num = desc['epoch']
         fig.suptitle(f'{session}, epoch {epoch_num}', fontsize=16)
 
         if return_fig:
