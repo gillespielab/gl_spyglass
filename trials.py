@@ -121,7 +121,7 @@ class TrialInfo(dj.Computed):
         filepath = (AnalysisNwbfile & {"analysis_file_name" : filename}).fetch1("analysis_file_abs_path")
         nwbfile = get_nwb_file(filepath)
         trials_df = nwbfile.objects[obj_id]
-        return trials_df
+        return trials_df.to_dataframe()
     
     def plot_trials(self):
         '''
@@ -171,7 +171,7 @@ def get_sc_descriptors(sc_text):
             descriptors["lockout_period"] = int(line[line.index('=') + 1 : ].strip()) / 1000
         elif re.match(r'^(outerReps\s*=?).*', line):
             if "np.random.randint" in line:
-                rangestr = line[line.index('(') + 1 : line.index(')') + 1]
+                rangestr = line[line.index('(') + 1 : line.index(')')]
                 range = rangestr.split(',')
                 descriptors['outer_reps'] = [int(range[0]), int(range[1])]
             else:
