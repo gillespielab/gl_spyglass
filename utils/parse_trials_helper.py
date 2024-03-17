@@ -55,23 +55,23 @@ class V8TrialParser(TrialParser):
     @staticmethod
     def plot_trials(df, session, epoch_num, return_fig=False):
         
-        trialtype = df['trial_type'][:]
-        RWstart = df['rw_start'][:]
-        RWend = df['rw_end'][:]
-        outertime = df['outer_time'][:]
-        outerwell = df['outer_well'][:]
-        goalwell = df['goal_well'][:]
+        trialtype = df['trial_type'].to_numpy()
+        RWstart = df['rw_start'].to_numpy()
+        RWend = df['rw_end'].to_numpy()
+        outertime = df['outer_time'].to_numpy()
+        outerwell = df['outer_well'].to_numpy()
+        goalwell = df['goal_well'].to_numpy()
 
         lockstarts = []
         lockends = []
         for t in range(len(df)):
-            lockstarts.extend(df['lockout_starts'][t])
-            lockends.extend(df['lockout_ends'][t])
+            lockstarts.extend(df['lockout_starts'].iat[t])
+            lockends.extend(df['lockout_ends'].iat[t])
         
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10,10))
         
         ax1.set_title("Landmark times")
-        ax1.set_xlim(df['start_time'][0], df['end_time'][-1])
+        ax1.set_xlim(df['start_time'].iat[0], df['end_time'].iat[-1])
         ax1.set_xlabel('Time (ms)')
         ax1.set_ylim(-1, 3)
         ax1.set_yticks([])
@@ -88,12 +88,12 @@ class V8TrialParser(TrialParser):
         ax1.legend(['starttime', 'leavehome', 'RWstart (rip trial)', 'RWstart (wait trial)', 'RWend (rip)', 'RWend (wait)', 'goal well times', 'non-goal well times', 'lockstarts', 'lockends'], loc='upper right', ncol=2)
         
         ax2.set_title("Goal well visits")
-        ax2.set_xlim(df['start_time'][0], df['end_time'][-1])
+        ax2.set_xlim(df['start_time'].iat[0], df['end_time'].iat[-1])
         ax2.set_xlabel('Time (ms)')
         ax2.set_ylabel('Well number')
         ax2.plot(outertime[np.equal(outerwell, goalwell).nonzero()[0]], outerwell[np.equal(outerwell, goalwell).nonzero()[0]], 'm*')
         ax2.plot(outertime[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], 'mo')
-        ax2.plot(df['leave_outer'], df['outer_well'], 'm.')
+        ax2.plot(df['leave_outer'], df['outer_well'], 'm|')
         ax2.legend(['goal well arms', 'non-goal well arms'])
         fig.suptitle(f'{session}, epoch {epoch_num}', fontsize=16)
 
@@ -173,7 +173,6 @@ class V8TrialParser(TrialParser):
         tmp['outer_success'] = np.zeros(len(tmp['start_time']))
         tmp['goal_well'] = np.zeros(len(tmp['start_time']))
         tmp['rw_success'] = np.zeros(len(tmp['start_time']))
-        #print(tmp)
 
         for t in range(len(goodhome) - 1):
             try:
@@ -194,8 +193,6 @@ class V8TrialParser(TrialParser):
                             tmp['leave_home'].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp['rw_start'].iat[t]])][-1]
                             tmp['rw_end'].iat[t] = ripends[valid_indices(ripends, [start_time, end_time])][0]
                             tmp['leave_rw'].iat[t] = downtimesall[valid_indices(downtimesall, [tmp['rw_start'].iat[t], tmp['lockout_starts'].iat[t][0]])][-1]
-                            if (tmp['rw_start'].iat[t] >= tmp['rw_end'].iat[t]):
-                                print(f"Trial {t}, line 163: RWstart >= RWend")
                             # those trials when he gets click/beep just as he leaves
                             if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) < .3 and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) > 0:
                                 tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
@@ -205,8 +202,6 @@ class V8TrialParser(TrialParser):
                             tmp['leave_home'].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp['rw_start'].iat[t]])][-1]
                             tmp['rw_end'].iat[t] = waitends[valid_indices(waitends, [start_time, end_time])][0]
                             tmp['leave_rw'].iat[t] = downtimesall[valid_indices(downtimesall, [tmp['rw_start'].iat[t], tmp['lockout_starts'].iat[t][0]])][-1]
-                            if (tmp['rw_start'].iat[t] >= tmp['rw_end'].iat[t]):
-                                print(f"Trial {t}, line 174: RWstart >= RWend")
                             # those trials when he gets click/beep just as he leaves
                             if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) < .3 and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) > 0:
                                 tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
@@ -247,8 +242,6 @@ class V8TrialParser(TrialParser):
                                 tmp['leave_rw'].iat[t] = tmp['lockout_starts'].iat[t][0]
                                 tmp['rw_end'].iat[t] = tmp['lockout_starts'].iat[t][0]
                                 tmp['leave_home'].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp['rw_start'].iat[t]])][-1]
-                                if (tmp['rw_start'].iat[t] >= tmp['rw_end'].iat[t]):
-                                    print(f"Trial {t}, line 216: RWstart >= RWend")
                             # correctly visited wait but was impatient
                             elif len(valid_indices(wait,[start_time, tmp['lockout_starts'].iat[t][0]])) > 0:
                                 tmp['trial_type'].iat[t] = 2
@@ -257,8 +250,6 @@ class V8TrialParser(TrialParser):
                                 tmp['leave_rw'].iat[t] = tmp['lockout_starts'].iat[t][0]
                                 tmp['rw_end'].iat[t] = tmp['lockout_starts'].iat[t][0]
                                 tmp['leave_home'].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp['rw_start'].iat[t]])][-1]
-                                if (tmp['rw_start'].iat[t] >= tmp['rw_end'].iat[t]):
-                                    print(f"Trial {t}, line 226: RWstart >= RWend")
                 # COMPLETE TRIAL no lockouts
                 else:
                     tmp['rw_success'].iat[t] = 1
@@ -279,8 +270,6 @@ class V8TrialParser(TrialParser):
                         if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] < .3) and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] > 0):
                             tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
                         
-                        if (tmp['rw_start'].iat[t] >= tmp['rw_end'].iat[t]):
-                            print(f"Trial {t}, line 248: RWstart >= RWend")
                     elif len(valid_indices(wait, [start_time, end_time-.001])): # wait trial
                         tmp['trial_type'].iat[t] = 2 # type=wait
                         tmp['rw_start'].iat[t] = wait[valid_indices(wait, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
@@ -290,8 +279,6 @@ class V8TrialParser(TrialParser):
                         #those trials when he gets click/beep just as he leaves
                         if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] < .3) and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] > 0):
                             tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
-                        if (tmp['rw_start'].iat[t] >= tmp['rw_end'].iat[t]):
-                                    print(f"Trial {t}, line 259: RWstart >= RWend")
                 
                 # sanity checks:
                 assert(tmp['start_time'].iat[t] < tmp['leave_home'].iat[t])
@@ -361,16 +348,17 @@ def lookup(reference, target):
 
 def goodhome_filter(home, lockstarts):
     '''
-    Returns a list of indices i such that lockstart-0.3 <= home[i] <= lockstart FOR ALL times in lockstarts
+    Returns a list of indices i such that home[i] < lockstart-.3 or home[i] > lockstart FOR ALL times in lockstarts
 
     Assumes home and lockstarts are 1D ndarrays containing monotonically increasing values (timestamps).
     '''
+    if lockstarts.size == 0:
+        return np.arange(home.size)
     indices = []
-    left = 0
-    for locktime in lockstarts:
-        while (left < home.size and (home[left] >= locktime-0.3 and home[left] <= locktime)):
-            left += 1
-        if left < home.size:
-            indices.append(left)
-            left += 1
+    for i in range(home.size):
+        if np.max(lockstarts > home[i]) == 0: # case where no lockstarts occurred after hometime
+            return np.array(indices)
+        j = np.argmax(lockstarts > home[i]) # first index where lockstart > hometime
+        if lockstarts[j]-0.3 > home[i]: # include i if hometime[i] < lockstart-3
+            indices.append(i)
     return np.array(indices)
