@@ -27,7 +27,7 @@ class TrialInfo(dj.Computed):
     parser: varchar(100)                # type of parser used to interpret statescript log
     descriptors = null : blob           # global descriptors for task
     """
-    
+
 
     def make(self, key):
         '''
@@ -43,7 +43,7 @@ class TrialInfo(dj.Computed):
         behav_events = nwbf.processing.get("behavior").data_interfaces['behavioral_events']
         diomap = {} # map of event name to channel
         for (name,series) in behav_events.time_series.items():
-            diomap[name] = series.description 
+            diomap[name] = series.description
         # get timestamps of all homedio events in the session
         homediotimesall = np.asarray(behav_events.time_series['homebeam'].timestamps)
 
@@ -68,7 +68,7 @@ class TrialInfo(dj.Computed):
         if associated_files is None:
             logger.info(f"No associated files found for {epoch_name}")
             return
-        
+
         # get and parse trials from each statescript
         file_id = (StateScriptFile & key).fetch1("file_object_id")
         sc = nwbf.objects[file_id]
@@ -83,7 +83,7 @@ class TrialInfo(dj.Computed):
             parser = V8TrialParser(sc.content, diomap, first_home_time, key)
         elif task_name == 'Sleep':
             logger.info(f"Skipping sleep epoch: {epoch_name}")
-            return 
+            return
         else:
             logger.info(f"Skipping unsupported task type: {task_name}")
             return
@@ -105,27 +105,27 @@ class TrialInfo(dj.Computed):
             analysis_file_name=key["analysis_file_name"],
         )
         self.insert1(key)
-    
+
     def fetch1_dataframe(self):
         '''
-        Fetch the trial-by-trial analysis dataframe for a given epoch on a given day. 
+        Fetch the trial-by-trial analysis dataframe for a given epoch on a given day.
         Only valid when a single epoch is selected.
 
         Example:
         restr = {"nwb_file_name": "bobrick20231114_.nwb", "epoch": 4}
         (TrialInfo & restr).fetch1_dataframe()
         '''
-        
+
         filename = self.fetch1("analysis_file_name")
         obj_id = self.fetch1("trial_info_object_id")
         filepath = (AnalysisNwbfile & {"analysis_file_name" : filename}).fetch1("analysis_file_abs_path")
         nwbfile = get_nwb_file(filepath)
         trials_df = nwbfile.objects[obj_id]
         return trials_df.to_dataframe()
-    
+
     def plot_trials(self):
         '''
-        Visualize behavioral landmark information for a given epoch on a given day. 
+        Visualize behavioral landmark information for a given epoch on a given day.
         Only valid when a single epoch is selected.
         Top plot: timestamps when certain landmarks were triggered
         Bottom plot: history of outerwells visited
@@ -147,7 +147,7 @@ class TrialInfo(dj.Computed):
 
 def get_sc_descriptors(sc_text):
     '''
-    Helper method to retrieve key descriptors from the statescript log. 
+    Helper method to retrieve key descriptors from the statescript log.
 
     sc_text: str    # text contents of statescript file
     '''

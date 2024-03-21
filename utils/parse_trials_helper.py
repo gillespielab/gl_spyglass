@@ -45,7 +45,7 @@ class V8TrialParser(TrialParser):
         lockout_type: int        # type of error that caused lockout
         during_lockout: blob     # wells visited during lockout
         """
-        
+
         # text: contents of the epoch's statescript file
         parsed_events = self.__parse_statescript()
         events_df = self.__filter_events(*parsed_events)
@@ -54,7 +54,7 @@ class V8TrialParser(TrialParser):
 
     @staticmethod
     def plot_trials(df, session, epoch_num, return_fig=False):
-        
+
         trialtype = df['trial_type'].to_numpy()
         RWstart = df['rw_start'].to_numpy()
         RWend = df['rw_end'].to_numpy()
@@ -67,9 +67,9 @@ class V8TrialParser(TrialParser):
         for t in range(len(df)):
             lockstarts.extend(df['lockout_starts'].iat[t])
             lockends.extend(df['lockout_ends'].iat[t])
-        
+
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10,10))
-        
+
         ax1.set_title("Landmark times")
         ax1.set_xlim(df['start_time'].iat[0], df['end_time'].iat[-1])
         ax1.set_xlabel('Time (ms)')
@@ -86,7 +86,7 @@ class V8TrialParser(TrialParser):
         ax1.plot(lockstarts, np.ones(len(lockends)), 'rx')
         ax1.plot(lockends, np.ones(len(lockstarts)), 'bx')
         ax1.legend(['starttime', 'leavehome', 'RWstart (rip trial)', 'RWstart (wait trial)', 'RWend (rip)', 'RWend (wait)', 'goal well times', 'non-goal well times', 'lockstarts', 'lockends'], loc='upper right', ncol=2)
-        
+
         ax2.set_title("Goal well visits")
         ax2.set_xlim(df['start_time'].iat[0], df['end_time'].iat[-1])
         ax2.set_xlabel('Time (ms)')
@@ -101,7 +101,7 @@ class V8TrialParser(TrialParser):
             return plt.gcf()
 
     def __parse_statescript(self):
-        
+
         lines = self.text.split('\n')
         data = [line.split(' ') for line in lines if len(line) > 0 and line[0] != '#']
         dataArray = np.array([d+['']*(6-len(d)) for d in data])
@@ -111,16 +111,16 @@ class V8TrialParser(TrialParser):
         upwellsall = dataArray[np.where(dataArray[:,1]=='UP'),2][0].astype(int)
         # DIO time = unix time (s since 1970), SC times = ms since Trodes began
         offset = self.time_offset - uptimesall[upwellsall == 1][0]
-        
+
         uptimesall = uptimesall + offset
 
         downtimesall = dataArray[np.where(dataArray[:,1]=='DOWN'),0][0].astype(int) / 1000 + offset
         downwellsall = dataArray[np.where(dataArray[:,1]=='DOWN'),2][0].astype(int)
-        
+
         lockends = dataArray[np.where(dataArray[:,1]=='LOCKEND'),0][0].astype(int) / 1000 + offset
-        
+
         lockstarts = lockends - 30  # !! lockoutPeriod= 30000
-        
+
         goalcount = dataArray[np.where(dataArray[:,1]=='goalTotal'),3][0].astype(int)
         goalcounttimes = dataArray[np.where(dataArray[:,1]=='goalTotal'),0][0].astype(int) / 1000 + offset
 
@@ -128,7 +128,7 @@ class V8TrialParser(TrialParser):
         waitends = dataArray[np.where(dataArray[:,1]=='CLICK1'),0][0].astype(int) / 1000 + offset
         ripends = dataArray[np.where(dataArray[:,1]=='BEEP1'),0][0].astype(int) / 1000 + offset
 
-        # TODO filter to timestamps that weren't repeat pokes        
+        # TODO filter to timestamps that weren't repeat pokes
         nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1 # use +1 to get first value in string of duplicates
         homeindsall = np.where(upwellsall == int(self.diomap['homelight'][-1]))[0]
         # home pokes that followed a lockout
@@ -137,7 +137,7 @@ class V8TrialParser(TrialParser):
         uptimes = uptimesall[mask]
         upwells = upwellsall[mask]
 
-        # TODO: shift well numbers for upwells/times and downwells/times to be backward compatible 
+        # TODO: shift well numbers for upwells/times and downwells/times to be backward compatible
         home = uptimes[upwells == int(self.diomap['homebeam'][-1])]
         rip = uptimes[upwells == int(self.diomap['Rbeam'][-1])]
         wait = uptimes[upwells == int(self.diomap['Wbeam'][-1])]
@@ -205,7 +205,7 @@ class V8TrialParser(TrialParser):
                             # those trials when he gets click/beep just as he leaves
                             if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) < .3 and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) > 0:
                                 tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
-                        
+
                         # also completed outer successfully (lockedout on way home, ie by going to r/w) (still considered locktype1, order error
                         if len(valid_indices(outer[:, 0], [start_time, tmp['lockout_starts'].iat[t][0]-.1])) > 0:
                             tmp['outer_time'].iat[t] = outer[valid_indices(outer[:, 0], [start_time, tmp['lockout_starts'].iat[t][0]-.1])[0], 0]
@@ -214,7 +214,7 @@ class V8TrialParser(TrialParser):
                             if len(valid_indices(goalrec, [tmp['start_time'].iat[t],tmp['lockout_starts'].iat[t][0]])) > 0: # received outer reward
                                 tmp['goal_well'].iat[t] = tmp['outer_well'].iat[t]
                                 tmp['outer_success'].iat[t] = 1
-                    
+
                     # did not complete rip/wait successfully
                     else:
                         tmp['rw_success'].iat[t] = 0
@@ -259,7 +259,7 @@ class V8TrialParser(TrialParser):
                     if len(valid_indices(goalrec, [start_time, end_time])): # received outer reward
                         tmp['goal_well'].iat[t] = tmp['outer_well'].iat[t]
                         tmp['outer_success'].iat[t] = 1
-                    
+
                     if len(valid_indices(rip, [start_time, end_time-.001])): # rip trial -.001 to catch trodes freeze trials
                         tmp['trial_type'].iat[t] = 1 # type=rip
                         tmp['rw_start'].iat[t] = rip[valid_indices(rip, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
@@ -269,7 +269,7 @@ class V8TrialParser(TrialParser):
                         #those trials when he gets click/beep just as he leaves
                         if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] < .3) and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] > 0):
                             tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
-                        
+
                     elif len(valid_indices(wait, [start_time, end_time-.001])): # wait trial
                         tmp['trial_type'].iat[t] = 2 # type=wait
                         tmp['rw_start'].iat[t] = wait[valid_indices(wait, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
@@ -279,7 +279,7 @@ class V8TrialParser(TrialParser):
                         #those trials when he gets click/beep just as he leaves
                         if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] < .3) and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t] > 0):
                             tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
-                
+
                 # sanity checks:
                 assert(tmp['start_time'].iat[t] < tmp['leave_home'].iat[t])
                 assert(tmp['rw_start'].iat[t] <= tmp['rw_end'].iat[t])
@@ -306,7 +306,7 @@ class V8TrialParser(TrialParser):
                 tmp['leave_outer'].iat[t] = 0
                 tmp['goal_well'].iat[t] = 0
                 tmp['rw_success'].iat[t] = 0
-        
+
         # work backwards to fill in goal info based on rewarded locations (only know once he gets goal for the first time)
         # this also works whne the end of the ep ends in zeros ( will just overwrite 0 with 0), just can't know goal for those trials
         for t in range(len(tmp['goal_well'])-1, 0, -1):
@@ -323,7 +323,7 @@ def valid_indices(values, bounds):
     '''
     values (array/list of ints)
     bounds (tuple): [lowerbound, upperbound]
-    
+
     Returns new array containing indices i such that
     where lowerbound <= values[i] < upperbound
     '''
