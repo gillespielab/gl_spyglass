@@ -9,7 +9,6 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 
 from utils.parse_trials_helper import V8TrialParser
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import re
