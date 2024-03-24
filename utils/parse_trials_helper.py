@@ -161,18 +161,18 @@ class V8TrialParser(TrialParser):
         tmp['lockout_starts'] = np.empty((len(tmp['start_time']), 0)).tolist()
         tmp['lockout_ends'] = np.empty((len(tmp['start_time']), 0)).tolist()
         tmp['during_lockout'] = np.empty((len(tmp), 0)).tolist() # tuple of uptimes and waittimes lists?
-        tmp['lockout_type'] = np.zeros(len(tmp['start_time']))
+        tmp['lockout_type'] = np.zeros(len(tmp['start_time']), dtype=np.int8)
         tmp['rw_start'] = np.zeros(len(tmp['start_time']))
         tmp['rw_end'] = np.zeros(len(tmp['start_time']))
         tmp['leave_home'] = np.zeros(len(tmp['start_time']))
         tmp['leave_rw'] = np.zeros(len(tmp['start_time']))
-        tmp['trial_type'] = np.zeros(len(tmp['start_time']))
+        tmp['trial_type'] = np.zeros(len(tmp['start_time']), dtype=np.int8)
         tmp['outer_well'] = np.zeros(len(tmp['start_time']), dtype=np.int8)
         tmp['outer_time'] = np.zeros(len(tmp['start_time']))
         tmp['leave_outer'] = np.zeros(len(tmp['start_time']))
         tmp['outer_success'] = np.zeros(len(tmp['start_time']))
-        tmp['goal_well'] = np.zeros(len(tmp['start_time']))
-        tmp['rw_success'] = np.zeros(len(tmp['start_time']))
+        tmp['goal_well'] = np.zeros(len(tmp['start_time']), dtype=np.int8)
+        tmp['rw_success'] = np.zeros(len(tmp['start_time']), dtype=np.int8)
 
         for t in range(len(goodhome) - 1):
             try:
@@ -206,7 +206,7 @@ class V8TrialParser(TrialParser):
                             if (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) < .3 and (tmp['rw_end'].iat[t] - tmp['leave_rw'].iat[t]) > 0:
                                 tmp['leave_rw'].iat[t] = tmp['rw_end'].iat[t]
                         
-                        # also completed outer successfully (lockedout on way home, ie by going to r/w) (still considered locktype1, order error
+                        # also completed outer successfully (lockedout on way home, ie by going to r/w), still considered locktype1, order error
                         if len(valid_indices(outer[:, 0], [start_time, tmp['lockout_starts'].iat[t][0]-.1])) > 0:
                             tmp['outer_time'].iat[t] = outer[valid_indices(outer[:, 0], [start_time, tmp['lockout_starts'].iat[t][0]-.1])[0], 0]
                             tmp['outer_well'].iat[t] = outer[valid_indices(outer[:, 0], [start_time, tmp['lockout_starts'].iat[t][0]-.1])[0], 1]
