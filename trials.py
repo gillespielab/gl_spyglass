@@ -1,5 +1,4 @@
 import datajoint as dj
-from spyglass.utils import logger
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_behav import StateScriptFile
 from spyglass.common.common_interval import IntervalList
@@ -7,6 +6,7 @@ from spyglass.common.common_session import Session
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.utils import SpyglassMixin, logger
 
 from utils.parse_trials_helper import V8TrialParser
 import numpy as np
@@ -17,7 +17,7 @@ schema = dj.schema("TrialsInfo")
 
 
 @schema
-class TrialInfo(dj.Computed):
+class TrialInfo(dj.Computed, SpyglassMixin):
     definition = """
     -> StateScriptFile
     ---
