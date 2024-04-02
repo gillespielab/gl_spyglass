@@ -4,28 +4,30 @@ import sys
 import matplotlib.pyplot as plt
 from abc import ABC, abstractclassmethod
 
+MILLISECONDS_PER_SECOND = 1000
+
 class TrialParser(ABC):
     @abstractclassmethod
-    def parse_trials(self, epoch_key):
+    def parse_trials(self):
         pass
 
 
 class V8TrialParser(TrialParser):
-    def __init__(self, text, diomap, time_offset, desc):
+    def __init__(self, text, diomap, time_offset, key):
         '''
         text (str): raw text from statescript log
         diomap (dict): map event names to their dio channel (e.g. {'homebeam': 'Din1', ...})
         firsthometime (float): timestamp of 1st time homebeam was triggered. used for calculating timestamp offset.
-        desc (dict): TaskEpoch key detailing session name and epoch number
+        desc (dict): key detailing session name, epoch number, and epoch descriptors
         '''
         self.text = text
         self.diomap = diomap
         self.time_offset = time_offset
-        self.desc = desc
+        self.key = key
         self.trials_df = None
 
     def parse_trials(self):
-        """Returne a dataframe containing the following trial metrics
+        """Return a dataframe containing the following trial metrics
         ---
         start_time: double       # start time of trial
         end_time: double         # end time of trial
@@ -54,7 +56,6 @@ class V8TrialParser(TrialParser):
 
     @staticmethod
     def plot_trials(df, session, epoch_num, return_fig=False):
-        
         trialtype = df['trial_type'].to_numpy()
         RWstart = df['rw_start'].to_numpy()
         RWend = df['rw_end'].to_numpy()
@@ -101,66 +102,83 @@ class V8TrialParser(TrialParser):
             return plt.gcf()
 
     def __parse_statescript(self):
-        
+        ''' Helper function to parse statescript log into timestamp arrays or 
+        records of various behavioral landmarks (home well / center wells / outer well visits,
+        start & end times of rip/wait trials, start & end times of lockouts, record of goals)
+        '''
+        # process text from statescript log
         lines = self.text.split('\n')
         data = [line.split(' ') for line in lines if len(line) > 0 and line[0] != '#']
         dataArray = np.array([d+['']*(6-len(d)) for d in data])
+        descriptors = self.key['descriptors']
 
         # initialize uptimesall, downtimesall, lockends, lockstarts, goalcount, goalcounttimes, waitends, ripends
-        uptimesall = dataArray[np.where(dataArray[:,1]=='UP'),0][0].astype(int) / 1000
-        upwellsall = dataArray[np.where(dataArray[:,1]=='UP'),2][0].astype(int)
-        # DIO time = unix time (s since 1970), SC times = ms since Trodes began
-        offset = self.time_offset - uptimesall[upwellsall == 1][0]
+        up_indexes = dataArray[:,1]=='UP'
+        uptimesall = dataArray[up_indexes,0].astype(int) / MILLISECONDS_PER_SECOND
+        upwellsall = dataArray[up_indexes,2].astype(int)
         
+        offset = self.time_offset - uptimesall[upwellsall == 1][0] # DIO time = unix time (s), SC times = times since Trodes booted up (ms)
         uptimesall = uptimesall + offset
 
-        downtimesall = dataArray[np.where(dataArray[:,1]=='DOWN'),0][0].astype(int) / 1000 + offset
-        downwellsall = dataArray[np.where(dataArray[:,1]=='DOWN'),2][0].astype(int)
+        down_indexes = dataArray[:,1]=='DOWN'
+        downtimesall = dataArray[down_indexes,0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        downwellsall = dataArray[down_indexes,2].astype(int)
         
-        lockends = dataArray[np.where(dataArray[:,1]=='LOCKEND'),0][0].astype(int) / 1000 + offset
+        lockends = dataArray[dataArray[:,1]=='LOCKEND',0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        lockstarts = lockends - descriptors['lockout_period']  # e.g lockout_period= 30.0
         
-        lockstarts = lockends - 30  # !! lockoutPeriod= 30000
-        
-        goalcount = dataArray[np.where(dataArray[:,1]=='goalTotal'),3][0].astype(int)
-        goalcounttimes = dataArray[np.where(dataArray[:,1]=='goalTotal'),0][0].astype(int) / 1000 + offset
+        goalcount_indexes = dataArray[:,1]=='goalTotal'
+        goalcount = dataArray[goalcount_indexes,3].astype(int)
+        goalcounttimes = dataArray[goalcount_indexes,0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # CHANGE BASED ON RAT
-        waitends = dataArray[np.where(dataArray[:,1]=='CLICK1'),0][0].astype(int) / 1000 + offset
-        ripends = dataArray[np.where(dataArray[:,1]=='BEEP1'),0][0].astype(int) / 1000 + offset
+        #TODO: consider optional param per subject
+        waitends = dataArray[dataArray[:,1]=='CLICK1',0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        ripends = dataArray[dataArray[:,1]=='BEEP1',0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
-        # TODO filter to timestamps that weren't repeat pokes        
-        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1 # use +1 to get first value in string of duplicates
-        homeindsall = np.where(upwellsall == int(self.diomap['homelight'][-1]))[0]
-        # home pokes that followed a lockout
+        # filter to timestamps that weren't repeat pokes        
+        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1 # use +1 to get only the 1st value in string of duplicates
+        homeindsall = np.where(upwellsall == int(self.diomap['homebeam']))[0]
+        # include home pokes that followed a lockout
         afterlockinds = np.intersect1d(lookup(lockends, uptimesall), homeindsall)
-        mask = np.concatenate((nonrepinds, afterlockinds))
-        uptimes = uptimesall[mask]
-        upwells = upwellsall[mask]
+        valid_poke_mask = np.concatenate((nonrepinds, afterlockinds))
+        uptimes = uptimesall[valid_poke_mask]
+        upwells = upwellsall[valid_poke_mask]
 
-        # TODO: shift well numbers for upwells/times and downwells/times to be backward compatible 
-        home = uptimes[upwells == int(self.diomap['homebeam'][-1])]
-        rip = uptimes[upwells == int(self.diomap['Rbeam'][-1])]
-        wait = uptimes[upwells == int(self.diomap['Wbeam'][-1])]
-        outer = np.array([uptimes[upwells > 3], upwells[upwells > 3]])
+        # get timestamps where home, rip, wait, and outer wells were visited
+        home = uptimes[upwells == int(self.diomap['homebeam'])]
+        rip = uptimes[upwells == int(self.diomap['Rbeam'])]
+        wait = uptimes[upwells == int(self.diomap['Wbeam'])]
+        outer = np.array([uptimes[upwells > 3], upwells[upwells > 3]]) # specify that 3 is the first outerwell
         # filter goal records to only count times where goalcount increased
         goalrec = goalcounttimes[np.where(np.diff(goalcount) > 0)[0] + 1]
+
+        # TODO: maybe return as a dictionary instead of a bunch of variables
         return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
 
     def __filter_events(self, home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec):
         '''
-        Generates a dataframe containing behavior metrics for the given run epoch.
+        Filters parsed behavioral events for epoch based on task rules and stores results in a dataframe
         '''
+        
         # only use start times that are NOT within 0.3 s of a lockstart
         goodhome = home[goodhome_filter(home, lockstarts)]
 
-        # initialize dataframe to be populated
+        # TODO: refactor to first populate a list of dictionaries, then convert to a dataframe 
+        # (dataframes should not populated row-wise)
+
+        # TODO: move parsing code for each scenario into its own helper function (e.g. lockout vs complete)
+        # TODO: reuse same code for rip/wait trials. logic is similar, pass trial type as a parameter
+
+        # initialize dataframe to be populated-- TODO: initialize cols
         tmp = pd.DataFrame()
         tmp.index += 1
         tmp['start_time'] = goodhome[:-1]  # starttime (all homepokes excluding the last)
         tmp['end_time'] = goodhome[1:]     # endtime (all homepokes excluding the first)
-        tmp['lockout_starts'] = np.empty((len(tmp['start_time']), 0)).tolist()
+        
+        tmp['lockout_starts'] = np.empty((len(tmp['start_time']), 0)).tolist() # TODO adjust syntax
         tmp['lockout_ends'] = np.empty((len(tmp['start_time']), 0)).tolist()
-        tmp['during_lockout'] = np.empty((len(tmp), 0)).tolist() # tuple of uptimes and waittimes lists?
+        tmp['during_lockout'] = np.empty((len(tmp), 0)).tolist()
         tmp['lockout_type'] = np.zeros(len(tmp['start_time']), dtype=np.int8)
         tmp['rw_start'] = np.zeros(len(tmp['start_time']))
         tmp['rw_end'] = np.zeros(len(tmp['start_time']))
@@ -290,7 +308,7 @@ class V8TrialParser(TrialParser):
                 _, _, e_traceback = sys.exc_info()
                 e_line = e_traceback.tb_lineno
 
-                print("bug trial #%d, epoch %d! line %d: %s" % (t, self.desc['epoch'], e_line, str(e)))
+                print("bug trial #%d, epoch %d! line %d: %s" % (t, self.key['epoch'], e_line, str(e)))
                 #zero out all measures for bug trials!
                 tmp['lockout_starts'].iat[t] = []
                 tmp['lockout_ends'].iat[t] = []
@@ -308,7 +326,7 @@ class V8TrialParser(TrialParser):
                 tmp['rw_success'].iat[t] = 0
         
         # work backwards to fill in goal info based on rewarded locations (only know once he gets goal for the first time)
-        # this also works whne the end of the ep ends in zeros ( will just overwrite 0 with 0), just can't know goal for those trials
+        # this also works when the end of the ep ends in zeros ( will just overwrite 0 with 0), just can't know goal for those trials
         for t in range(len(tmp['goal_well'])-1, 0, -1):
             if tmp['goal_well'].iat[t-1] == 0:
                 tmp['goal_well'].iat[t-1] = tmp['goal_well'].iat[t]
