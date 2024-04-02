@@ -14,10 +14,9 @@ from utils.parse_trials_helper import V8TrialParser
 import numpy as np
 import re
 
-# TODO drop table
+# TODO consider adding TrialInfoSelection table?
 schema = dj.schema("TrialInfo")
 
-# TODO: add DIOEvents dependency (foreign or primary key?)
 @schema
 class TrialInfo(SpyglassMixin, dj.Computed):
     definition = """
@@ -29,7 +28,7 @@ class TrialInfo(SpyglassMixin, dj.Computed):
     parser: varchar(100)                # type of parser used to interpret statescript log
     descriptors = null : blob           # global descriptors for task
     """
-    
+
     def make(self, key):
         '''
         Parses the given StateScriptFile into landmark behavioral events
