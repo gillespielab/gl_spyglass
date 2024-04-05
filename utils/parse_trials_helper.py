@@ -66,8 +66,8 @@ class V8TrialParser(TrialParser):
         lockstarts = []
         lockends = []
         for t in range(len(df)):
-            lockstarts.extend(df["lockout_starts"].iat[t])
-            lockends.extend(df["lockout_ends"].iat[t])
+            lockstarts.extend(df["lockout_starts"])
+            lockends.extend(df["lockout_ends"])
         
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10,10))
         
@@ -185,139 +185,143 @@ class V8TrialParser(TrialParser):
         # TODO: move parsing code for each scenario into its own helper function (e.g. lockout vs complete)
         # TODO: reuse same code for rip/wait trials. logic is similar, pass trial type as a parameter
 
-        # initialize dataframe to be populated-- TODO: initialize cols
-        tmp = pd.DataFrame()
-        tmp.index += 1
-        tmp["start_time"] = goodhome[:-1]  # starttime (all homepokes excluding the last)
-        tmp["end_time"] = goodhome[1:]     # endtime (all homepokes excluding the first)
-        
-        tmp["lockout_starts"] = np.empty((len(tmp["start_time"]), 0)).tolist() # TODO adjust syntax
-        tmp["lockout_ends"] = np.empty((len(tmp["start_time"]), 0)).tolist()
-        tmp["during_lockout"] = np.empty((len(tmp), 0)).tolist()
-        tmp["lockout_type"] = np.zeros(len(tmp["start_time"]), dtype=np.int8)
-        tmp["rw_start"] = np.zeros(len(tmp["start_time"]))
-        tmp["rw_end"] = np.zeros(len(tmp["start_time"]))
-        tmp["leave_home"] = np.zeros(len(tmp["start_time"]))
-        tmp["leave_rw"] = np.zeros(len(tmp["start_time"]))
-        tmp["trial_type"] = np.zeros(len(tmp["start_time"]), dtype=np.int8)
-        tmp["outer_well"] = np.zeros(len(tmp["start_time"]), dtype=np.int8)
-        tmp["outer_time"] = np.zeros(len(tmp["start_time"]))
-        tmp["leave_outer"] = np.zeros(len(tmp["start_time"]))
-        tmp["outer_success"] = np.zeros(len(tmp["start_time"]))
-        tmp["goal_well"] = np.zeros(len(tmp["start_time"]), dtype=np.int8)
-        tmp["rw_success"] = np.zeros(len(tmp["start_time"]), dtype=np.int8)
+        # initialize dataframe to be populated-- TODO: initialize as list of dicts, convert to df after populating.
+        trial_data = []
+        start_times = goodhome[:-1]
+        end_times = goodhome[1:]
 
         for t in range(len(goodhome) - 1):
+            trial = dict(
+                trial_num=t+1,
+                start_time=start_times[t], 
+                end_time=end_times[t],
+                leave_home=0.0,
+                trial_type=0,
+                rw_start=0.0,
+                rw_end=0.0,
+                leave_rw=0.0,
+                rw_success=0,
+                outer_well=0,
+                goal_well=0,
+                outer_time=0.0,
+                leave_outer=0.0,
+                outer_success=0,
+                lockout_starts=[],
+                lockout_ends = [],
+                during_lockout=[],
+                lockout_type=0,
+            )
+            
             try:
+                start_time = trial["start_time"]
+                end_time = trial["end_time"]
                 # error trials
-                start_time = tmp["start_time"].iat[t]
-                end_time = tmp["end_time"].iat[t]
                 if len(valid_indices(lockstarts, [start_time, end_time])) > 0:
-                    tmp["lockout_starts"].iat[t] = lockstarts[valid_indices(lockstarts, [start_time, end_time])].tolist()
-                    tmp["lockout_ends"].iat[t] = lockends[valid_indices(lockstarts, [start_time, end_time])].tolist()
-                    tmp["during_lockout"].iat[t] = upwells[valid_indices(uptimes, [tmp["lockout_starts"].iat[t][0], end_time])].tolist() # TODO: add uptimes in addition to wells
+                    trial["lockout_starts"] = lockstarts[valid_indices(lockstarts, [start_time, end_time])].tolist()
+                    trial["lockout_ends"] = lockends[valid_indices(lockstarts, [start_time, end_time])].tolist()
+                    trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist() # TODO: add uptimes in addition to wells
                     # completed rip or wait well succesfully
                     if len(valid_indices(ripends, [start_time, end_time])) > 0 or len(valid_indices(waitends, [start_time, end_time])) > 0:
-                        tmp["lockout_type"].iat[t] = 1
-                        tmp["rw_success"].iat[t] = 1
-                        if len(valid_indices(rip, [start_time, tmp["lockout_starts"].iat[t][0]-0.1])):
-                            tmp["trial_type"].iat[t] = 1 # type=rip
-                            tmp["rw_start"].iat[t] = rip[valid_indices(rip, [start_time, tmp["lockout_starts"].iat[t][0]-.1])][0] # list??
-                            tmp["leave_home"].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp["rw_start"].iat[t]])][-1]
-                            tmp["rw_end"].iat[t] = ripends[valid_indices(ripends, [start_time, end_time])][0]
-                            tmp["leave_rw"].iat[t] = downtimesall[valid_indices(downtimesall, [tmp["rw_start"].iat[t], tmp["lockout_starts"].iat[t][0]])][-1]
+                        trial["lockout_type"] = 1
+                        trial["rw_success"] = 1
+                        if len(valid_indices(rip, [start_time, trial["lockout_starts"][0]-0.1])):
+                            trial["trial_type"] = 1 # type=rip
+                            trial["rw_start"] = rip[valid_indices(rip, [start_time, trial["lockout_starts"][0]-.1])][0] # list??
+                            trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
+                            trial["rw_end"] = ripends[valid_indices(ripends, [start_time, end_time])][0]
+                            trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
                             # those trials when he gets click/beep just as he leaves
-                            if (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t]) < .3 and (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t]) > 0:
-                                tmp["leave_rw"].iat[t] = tmp["rw_end"].iat[t]
-                        elif len(valid_indices(wait, [start_time, tmp["lockout_starts"].iat[t][0]-.1])):
-                            tmp["trial_type"].iat[t] = 2;  # type=wait
-                            tmp["rw_start"].iat[t] = wait[valid_indices(wait, [start_time, tmp["lockout_starts"].iat[t][0]-.1])][0]
-                            tmp["leave_home"].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp["rw_start"].iat[t]])][-1]
-                            tmp["rw_end"].iat[t] = waitends[valid_indices(waitends, [start_time, end_time])][0]
-                            tmp["leave_rw"].iat[t] = downtimesall[valid_indices(downtimesall, [tmp["rw_start"].iat[t], tmp["lockout_starts"].iat[t][0]])][-1]
+                            if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
+                                trial["leave_rw"] = trial["rw_end"]
+                        elif len(valid_indices(wait, [start_time, trial["lockout_starts"][0]-.1])):
+                            trial["trial_type"] = 2;  # type=wait
+                            trial["rw_start"] = wait[valid_indices(wait, [start_time, trial["lockout_starts"][0]-.1])][0]
+                            trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
+                            trial["rw_end"] = waitends[valid_indices(waitends, [start_time, end_time])][0]
+                            trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
                             # those trials when he gets click/beep just as he leaves
-                            if (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t]) < .3 and (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t]) > 0:
-                                tmp["leave_rw"].iat[t] = tmp["rw_end"].iat[t]
+                            if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
+                                trial["leave_rw"] = trial["rw_end"]
                         
                         # also completed outer successfully (lockedout on way home, ie by going to r/w), still considered locktype1, order error
-                        if len(valid_indices(outer[:, 0], [start_time, tmp["lockout_starts"].iat[t][0]-.1])) > 0:
-                            tmp["outer_time"].iat[t] = outer[valid_indices(outer[:, 0], [start_time, tmp["lockout_starts"].iat[t][0]-.1])[0], 0]
-                            tmp["outer_well"].iat[t] = outer[valid_indices(outer[:, 0], [start_time, tmp["lockout_starts"].iat[t][0]-.1])[0], 1]
-                            tmp["leave_outer"].iat[t] = downtimesall[(downtimesall >= tmp["outer_time"].iat[t]) & (downtimesall < tmp["lockout_starts"].iat[t][0]) & (downwellsall == tmp["outer_well"].iat[t])][0]
-                            if len(valid_indices(goalrec, [tmp["start_time"].iat[t],tmp["lockout_starts"].iat[t][0]])) > 0: # received outer reward
-                                tmp["goal_well"].iat[t] = tmp["outer_well"].iat[t]
-                                tmp["outer_success"].iat[t] = 1
+                        if len(valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])) > 0:
+                            trial["outer_time"] = outer[valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])[0], 0]
+                            trial["outer_well"] = outer[valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])[0], 1]
+                            trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
+                            if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
+                                trial["goal_well"] = trial["outer_well"]
+                                trial["outer_success"] = 1
                     
                     # did not complete rip/wait successfully
                     else:
-                        tmp["rw_success"].iat[t] = 0
+                        trial["rw_success"] = 0
                         #if he locks out by going straight out (locktype1 order error)
-                        if len(valid_indices(outer[0], [start_time, tmp["lockout_starts"].iat[t][0]])):
-                            tmp["leave_home"].iat[t] = downtimesall[(downtimesall == 1) & (downtimesall >= start_time) & downtimesall < tmp["lockout_starts"].iat[t]][-1]
-                            tmp["lockout_type"].iat[t] = 1
-                            tmp["trial_type"].iat[t] = 0 # type=error, cannot define r or w
+                        if len(valid_indices(outer[0], [start_time, trial["lockout_starts"][0]])):
+                            trial["leave_home"] = downtimesall[(downtimesall == 1) & (downtimesall >= start_time) & downtimesall < trial["lockout_starts"]][-1]
+                            trial["lockout_type"] = 1
+                            trial["trial_type"] = 0 # type=error, cannot define r or w
                         else:
                             # lockout bc visited rip on a wait trial
-                            if len(valid_indices(rip,[tmp["lockout_starts"].iat[t][0]-.01, tmp["lockout_starts"].iat[t][0]])) > 0: # rip visit was the lock cause
-                                tmp["trial_type"].iat[t] = 2
-                                tmp["lockout_type"].iat[t] = 2
-                                tmp["leave_home"].iat[t] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < tmp["lockout_starts"].iat[t][0])][-1]
+                            if len(valid_indices(rip,[trial["lockout_starts"][0]-.01, trial["lockout_starts"][0]])) > 0: # rip visit was the lock cause
+                                trial["trial_type"] = 2
+                                trial["lockout_type"] = 2
+                                trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"][0])][-1]
                             # lockout bc visited wait on a rip trial
-                            elif len(valid_indices(wait,[tmp["lockout_starts"].iat[t][0]-.01, tmp["lockout_starts"].iat[t][0]])) > 0: # wait visit was the lock cause
-                                tmp["trial_type"].iat[t] = 1
-                                tmp["lockout_type"].iat[t] = 2
-                                tmp["leave_home"].iat[t] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < tmp["lockout_starts"].iat[t][0])][-1]
+                            elif len(valid_indices(wait,[trial["lockout_starts"][0]-.01, trial["lockout_starts"][0]])) > 0: # wait visit was the lock cause
+                                trial["trial_type"] = 1
+                                trial["lockout_type"] = 2
+                                trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"][0])][-1]
                             # correctly visited rip but was impatient
-                            elif len(valid_indices(rip,[start_time, tmp["lockout_starts"].iat[t][0]])) > 0:
-                                tmp["trial_type"].iat[t] = 1
-                                tmp["lockout_type"].iat[t] = 3
-                                tmp["rw_start"].iat[t] = rip[valid_indices(rip, [start_time, tmp["lockout_starts"].iat[t][0]])][0]
-                                tmp["leave_rw"].iat[t] = tmp["lockout_starts"].iat[t][0]
-                                tmp["rw_end"].iat[t] = tmp["lockout_starts"].iat[t][0]
-                                tmp["leave_home"].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp["rw_start"].iat[t]])][-1]
+                            elif len(valid_indices(rip,[start_time, trial["lockout_starts"][0]])) > 0:
+                                trial["trial_type"] = 1
+                                trial["lockout_type"] = 3
+                                trial["rw_start"] = rip[valid_indices(rip, [start_time, trial["lockout_starts"][0]])][0]
+                                trial["leave_rw"] = trial["lockout_starts"][0]
+                                trial["rw_end"] = trial["lockout_starts"][0]
+                                trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
                             # correctly visited wait but was impatient
-                            elif len(valid_indices(wait,[start_time, tmp["lockout_starts"].iat[t][0]])) > 0:
-                                tmp["trial_type"].iat[t] = 2
-                                tmp["lockout_type"].iat[t] = 3
-                                tmp["rw_start"].iat[t] = wait[valid_indices(wait, [start_time, tmp["lockout_starts"].iat[t][0]])][0]
-                                tmp["leave_rw"].iat[t] = tmp["lockout_starts"].iat[t][0]
-                                tmp["rw_end"].iat[t] = tmp["lockout_starts"].iat[t][0]
-                                tmp["leave_home"].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp["rw_start"].iat[t]])][-1]
+                            elif len(valid_indices(wait,[start_time, trial["lockout_starts"][0]])) > 0:
+                                trial["trial_type"] = 2
+                                trial["lockout_type"] = 3
+                                trial["rw_start"] = wait[valid_indices(wait, [start_time, trial["lockout_starts"][0]])][0]
+                                trial["leave_rw"] = trial["lockout_starts"][0]
+                                trial["rw_end"] = trial["lockout_starts"][0]
+                                trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
                 # COMPLETE TRIAL no lockouts
                 else:
-                    tmp["rw_success"].iat[t] = 1
-                    tmp["outer_time"].iat[t] = outer[0, valid_indices(outer[0], [start_time, end_time])][0]
-                    tmp["outer_well"].iat[t] = outer[1, valid_indices(outer[0], [start_time, end_time])][0]
-                    tmp["leave_outer"].iat[t] = downtimesall[valid_indices(downtimesall, [tmp["outer_time"].iat[t], end_time])][-1]
+                    trial["rw_success"] = 1
+                    trial["outer_time"] = outer[0, valid_indices(outer[0], [start_time, end_time])][0]
+                    trial["outer_well"] = outer[1, valid_indices(outer[0], [start_time, end_time])][0]
+                    trial["leave_outer"] = downtimesall[valid_indices(downtimesall, [trial["outer_time"], end_time])][-1]
                     if len(valid_indices(goalrec, [start_time, end_time])): # received outer reward
-                        tmp["goal_well"].iat[t] = tmp["outer_well"].iat[t]
-                        tmp["outer_success"].iat[t] = 1
+                        trial["goal_well"] = trial["outer_well"]
+                        trial["outer_success"] = 1
                     
                     if len(valid_indices(rip, [start_time, end_time-.001])): # rip trial -.001 to catch trodes freeze trials
-                        tmp["trial_type"].iat[t] = 1 # type=rip
-                        tmp["rw_start"].iat[t] = rip[valid_indices(rip, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
-                        tmp["rw_end"].iat[t] = ripends[valid_indices(ripends, [start_time, end_time])][0]
-                        tmp["leave_rw"].iat[t] = downtimesall[valid_indices(downtimesall, [tmp["rw_start"].iat[t], tmp["outer_time"].iat[t]])][-1]
-                        tmp["leave_home"].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp["rw_start"].iat[t]])][-1]
+                        trial["trial_type"] = 1 # type=rip
+                        trial["rw_start"] = rip[valid_indices(rip, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
+                        trial["rw_end"] = ripends[valid_indices(ripends, [start_time, end_time])][0]
+                        trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
+                        trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
                         #those trials when he gets click/beep just as he leaves
-                        if (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t] < .3) and (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t] > 0):
-                            tmp["leave_rw"].iat[t] = tmp["rw_end"].iat[t]
+                        if (trial["rw_end"] - trial["leave_rw"] < .3) and (trial["rw_end"] - trial["leave_rw"] > 0):
+                            trial["leave_rw"] = trial["rw_end"]
                         
                     elif len(valid_indices(wait, [start_time, end_time-.001])): # wait trial
-                        tmp["trial_type"].iat[t] = 2 # type=wait
-                        tmp["rw_start"].iat[t] = wait[valid_indices(wait, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
-                        tmp["rw_end"].iat[t] = waitends[valid_indices(waitends, [start_time, end_time])][0]
-                        tmp["leave_rw"].iat[t] = downtimesall[valid_indices(downtimesall, [tmp["rw_start"].iat[t], tmp["outer_time"].iat[t]])][-1]
-                        tmp["leave_home"].iat[t] = downtimesall[valid_indices(downtimesall, [start_time, tmp["rw_start"].iat[t]])][-1]
+                        trial["trial_type"] = 2 # type=wait
+                        trial["rw_start"] = wait[valid_indices(wait, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
+                        trial["rw_end"] = waitends[valid_indices(waitends, [start_time, end_time])][0]
+                        trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
+                        trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
                         #those trials when he gets click/beep just as he leaves
-                        if (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t] < .3) and (tmp["rw_end"].iat[t] - tmp["leave_rw"].iat[t] > 0):
-                            tmp["leave_rw"].iat[t] = tmp["rw_end"].iat[t]
+                        if (trial["rw_end"] - trial["leave_rw"] < .3) and (trial["rw_end"] - trial["leave_rw"] > 0):
+                            trial["leave_rw"] = trial["rw_end"]
                 
                 # sanity checks:
-                assert(tmp["start_time"].iat[t] < tmp["leave_home"].iat[t])
-                assert(tmp["rw_start"].iat[t] <= tmp["rw_end"].iat[t])
-                assert(tmp["rw_end"].iat[t] <= tmp["leave_rw"].iat[t])
-                assert(tmp["outer_time"].iat[t] <= tmp["leave_outer"].iat[t])
+                assert(trial["start_time"] < trial["leave_home"])
+                assert(trial["rw_start"] <= trial["rw_end"])
+                assert(trial["rw_end"] <= trial["leave_rw"])
+                assert(trial["outer_time"] <= trial["leave_outer"])
 
             except Exception as e:
                 _, _, e_traceback = sys.exc_info()
@@ -325,29 +329,31 @@ class V8TrialParser(TrialParser):
 
                 print("bug trial #%d, epoch %d! line %d: %s" % (t, self.key["epoch"], e_line, str(e)))
                 #zero out all measures for bug trials!
-                tmp["lockout_starts"].iat[t] = []
-                tmp["lockout_ends"].iat[t] = []
-                tmp["during_lockout"].iat[t] = []
-                tmp["lockout_type"].iat[t] = 0
-                tmp["rw_start"].iat[t] = 0
-                tmp["rw_end"].iat[t] = 0
-                tmp["leave_home"].iat[t] = 0
-                tmp["leave_rw"].iat[t] = 0
-                tmp["trial_type"].iat[t] = 0
-                tmp["outer_well"].iat[t] = 0
-                tmp["outer_time"].iat[t] = 0
-                tmp["leave_outer"].iat[t] = 0
-                tmp["goal_well"].iat[t] = 0
-                tmp["rw_success"].iat[t] = 0
+                trial["lockout_starts"] = []
+                trial["lockout_ends"] = []
+                trial["during_lockout"] = []
+                trial["lockout_type"] = 0
+                trial["rw_start"] = 0.0
+                trial["rw_end"] = 0.0
+                trial["leave_home"] = 0.0
+                trial["leave_rw"] = 0.0
+                trial["trial_type"] = 0
+                trial["outer_well"] = 0
+                trial["outer_time"] = 0.0
+                trial["leave_outer"] = 0.0
+                trial["goal_well"] = 0
+                trial["rw_success"] = 0
+
+            trial_data.append(trial)
         
+        trial_df = pd.DataFrame(trial_data)
         # work backwards to fill in goal info based on rewarded locations (only know once he gets goal for the first time)
         # this also works when the end of the ep ends in zeros ( will just overwrite 0 with 0), just can"t know goal for those trials
-        for t in range(len(tmp["goal_well"])-1, 0, -1):
-            if tmp["goal_well"].iat[t-1] == 0:
-                tmp["goal_well"].iat[t-1] = tmp["goal_well"].iat[t]
-        tmp.index += 1
+        for t in range(len(trial_df["goal_well"])-1, 0, -1):
+            if trial_df["goal_well"].iat[t-1] == 0:
+                trial_df["goal_well"].iat[t-1] = trial_df["goal_well"].iat[t]
 
-        return tmp
+        return trial_df
 
 
 # HELPER FUNCTIONS
