@@ -2,12 +2,12 @@ import numpy as np
 import pandas as pd
 import sys
 import matplotlib.pyplot as plt
-from abc import ABC, abstractclassmethod
+from abc import ABC, abstractmethod
 
 MILLISECONDS_PER_SECOND = 1000
 
 class TrialParser(ABC):
-    @abstractclassmethod
+    @classmethod @abstractmethod
     def parse_trials(self):
         pass
 
