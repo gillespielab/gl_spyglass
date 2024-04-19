@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 MILLISECONDS_PER_SECOND = 1000
 
 class TrialParser(ABC):
-    @classmethod @abstractmethod
+    @abstractmethod
     def parse_trials(self):
         pass
 
