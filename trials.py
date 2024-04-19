@@ -15,7 +15,7 @@ import numpy as np
 import re
 
 # TODO consider adding TrialInfoSelection table?
-schema = dj.schema("TrialInfo")
+schema = dj.schema("trial_info")
 
 @schema
 class TrialInfo(SpyglassMixin, dj.Computed):
