@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import itertools
 import sys
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
@@ -13,14 +14,14 @@ class TrialParser(ABC):
 
 
 class V8TrialParser(TrialParser):
-    def __init__(self, text, diomap, time_offset, key):
+    def __init__(self, script, diomap, time_offset, key):
         """
-        text (str): raw text from statescript log
+        script (str): raw script from statescript log
         diomap (dict): map event names to their dio channel (e.g. {"homebeam": "Din1", ...})
         firsthometime (float): timestamp of 1st time homebeam was triggered. used for calculating timestamp offset.
         desc (dict): key detailing session name, epoch number, and epoch descriptors
         """
-        self.text = text
+        self.script = script
         self.diomap = diomap
         self.time_offset = time_offset
         self.key = key
@@ -48,7 +49,7 @@ class V8TrialParser(TrialParser):
         during_lockout: blob     # wells visited during lockout
         """
         
-        # text: contents of the epoch's statescript file
+        # script: contents of the epoch's statescript file
         parsed_events = self.__parse_statescript()
         events_df = self.__filter_events(*parsed_events)
         self.trials_df = events_df
@@ -63,11 +64,8 @@ class V8TrialParser(TrialParser):
         outerwell = df["outer_well"].to_numpy()
         goalwell = df["goal_well"].to_numpy()
 
-        lockstarts = []
-        lockends = []
-        for t in range(len(df)):
-            lockstarts.extend(df["lockout_starts"])
-            lockends.extend(df["lockout_ends"])
+        lockstarts = list(itertools.chain(*list(df["lockout_starts"])))
+        lockends = list(itertools.chain(*list(df["lockout_ends"])))
         
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10,10))
         
@@ -121,30 +119,31 @@ class V8TrialParser(TrialParser):
         records of various behavioral landmarks (home well / center wells / outer well visits,
         start & end times of rip/wait trials, start & end times of lockouts, record of goals)
         """
-        # process text from statescript log
-        lines = self.text.split("\n")
+        # process statescript log
+        lines = self.script.split("\n")
         data = [line.split(" ") for line in lines if len(line) > 0 and line[0] != "#"]
         dataArray = np.array([d+[""]*(6-len(d)) for d in data])
         descriptors = self.key["descriptors"]
 
         # initialize uptimesall, downtimesall, lockends, lockstarts, goalcount, goalcounttimes, waitends, ripends
-        up_indexes = dataArray[:,1]=="UP"
-        uptimesall = dataArray[up_indexes,0].astype(int) / MILLISECONDS_PER_SECOND
-        upwellsall = dataArray[up_indexes,2].astype(int)
+        up_mask = dataArray[:,1]=="UP"
+        uptimesall = dataArray[up_mask,0].astype(int) / MILLISECONDS_PER_SECOND
+        upwellsall = dataArray[up_mask,2].astype(int)
         
         offset = self.time_offset - uptimesall[upwellsall == 1][0] # DIO time = unix time (s), SC times = times since Trodes booted up (ms)
         uptimesall = uptimesall + offset
 
-        down_indexes = dataArray[:,1]=="DOWN"
-        downtimesall = dataArray[down_indexes,0].astype(int) / MILLISECONDS_PER_SECOND + offset
-        downwellsall = dataArray[down_indexes,2].astype(int)
+        down_mask = dataArray[:,1]=="DOWN"
+        downtimesall = dataArray[down_mask,0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        downwellsall = dataArray[down_mask,2].astype(int)
         
-        lockends = dataArray[dataArray[:,1]=="LOCKEND",0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        lockend_mask = dataArray[:,1]=="LOCKEND"
+        lockends = dataArray[lockend_mask,0].astype(int) / MILLISECONDS_PER_SECOND + offset
         lockstarts = lockends - descriptors["lockout_period"]  # e.g lockout_period= 30.0
         
-        goalcount_indexes = dataArray[:,1]=="goalTotal"
-        goalcount = dataArray[goalcount_indexes,3].astype(int)
-        goalcounttimes = dataArray[goalcount_indexes,0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        goalcount_mask = dataArray[:,1]=="goalTotal"
+        goalcount = dataArray[goalcount_mask,3].astype(int)
+        goalcounttimes = dataArray[goalcount_mask,0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # CHANGE BASED ON RAT
         #TODO: consider optional param per subject
@@ -152,7 +151,7 @@ class V8TrialParser(TrialParser):
         ripends = dataArray[dataArray[:,1]=="BEEP1",0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # filter to timestamps that weren't repeat pokes        
-        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1 # use +1 to get only the 1st value in string of duplicates
+        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1
         homeindsall = np.where(upwellsall == int(self.diomap["homebeam"]))[0]
         # include home pokes that followed a lockout
         afterlockinds = np.intersect1d(lookup(lockends, uptimesall), homeindsall)
@@ -168,7 +167,6 @@ class V8TrialParser(TrialParser):
         # filter goal records to only count times where goalcount increased
         goalrec = goalcounttimes[np.where(np.diff(goalcount) > 0)[0] + 1]
 
-        # TODO: maybe return as a dictionary instead of a bunch of variables
         return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
 
     def __filter_events(self, home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec):
@@ -179,13 +177,7 @@ class V8TrialParser(TrialParser):
         # only use start times that are NOT within 0.3 s of a lockstart
         goodhome = home[goodhome_filter(home, lockstarts)]
 
-        # TODO: refactor to first populate a list of dictionaries, then convert to a dataframe 
-        # (dataframes should not populated row-wise)
-
-        # TODO: move parsing code for each scenario into its own helper function (e.g. lockout vs complete)
-        # TODO: reuse same code for rip/wait trials. logic is similar, pass trial type as a parameter
-
-        # initialize dataframe to be populated-- TODO: initialize as list of dicts, convert to df after populating.
+        # initialize dataframe to be populated
         trial_data = []
         start_times = goodhome[:-1]
         end_times = goodhome[1:]
@@ -218,30 +210,16 @@ class V8TrialParser(TrialParser):
                 # error trials
                 if len(valid_indices(lockstarts, [start_time, end_time])) > 0:
                     trial["lockout_starts"] = lockstarts[valid_indices(lockstarts, [start_time, end_time])].tolist()
-                    trial["lockout_ends"] = lockends[valid_indices(lockstarts, [start_time, end_time])].tolist()
+                    trial["lockout_ends"] = lockends[valid_indices(lockends, [start_time, end_time])].tolist()
                     trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist() # TODO: add uptimes in addition to wells
                     # completed rip or wait well succesfully
                     if len(valid_indices(ripends, [start_time, end_time])) > 0 or len(valid_indices(waitends, [start_time, end_time])) > 0:
                         trial["lockout_type"] = 1
                         trial["rw_success"] = 1
                         if len(valid_indices(rip, [start_time, trial["lockout_starts"][0]-0.1])):
-                            trial["trial_type"] = 1 # type=rip
-                            trial["rw_start"] = rip[valid_indices(rip, [start_time, trial["lockout_starts"][0]-.1])][0] # list??
-                            trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
-                            trial["rw_end"] = ripends[valid_indices(ripends, [start_time, end_time])][0]
-                            trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
-                            # those trials when he gets click/beep just as he leaves
-                            if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
-                                trial["leave_rw"] = trial["rw_end"]
+                            rw_lockout("rip", trial, start_time, end_time, rip, ripends, downtimesall)
                         elif len(valid_indices(wait, [start_time, trial["lockout_starts"][0]-.1])):
-                            trial["trial_type"] = 2;  # type=wait
-                            trial["rw_start"] = wait[valid_indices(wait, [start_time, trial["lockout_starts"][0]-.1])][0]
-                            trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
-                            trial["rw_end"] = waitends[valid_indices(waitends, [start_time, end_time])][0]
-                            trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
-                            # those trials when he gets click/beep just as he leaves
-                            if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
-                                trial["leave_rw"] = trial["rw_end"]
+                            rw_lockout("wait", trial, start_time, end_time, wait, waitends, downtimesall)
                         
                         # also completed outer successfully (lockedout on way home, ie by going to r/w), still considered locktype1, order error
                         if len(valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])) > 0:
@@ -263,30 +241,16 @@ class V8TrialParser(TrialParser):
                         else:
                             # lockout bc visited rip on a wait trial
                             if len(valid_indices(rip,[trial["lockout_starts"][0]-.01, trial["lockout_starts"][0]])) > 0: # rip visit was the lock cause
-                                trial["trial_type"] = 2
-                                trial["lockout_type"] = 2
-                                trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"][0])][-1]
+                                rw_mismatch_lockout("wait", trial, downtimesall, downwellsall) 
                             # lockout bc visited wait on a rip trial
                             elif len(valid_indices(wait,[trial["lockout_starts"][0]-.01, trial["lockout_starts"][0]])) > 0: # wait visit was the lock cause
-                                trial["trial_type"] = 1
-                                trial["lockout_type"] = 2
-                                trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"][0])][-1]
+                                rw_mismatch_lockout("rip", trial, downtimesall, downwellsall)
                             # correctly visited rip but was impatient
                             elif len(valid_indices(rip,[start_time, trial["lockout_starts"][0]])) > 0:
-                                trial["trial_type"] = 1
-                                trial["lockout_type"] = 3
-                                trial["rw_start"] = rip[valid_indices(rip, [start_time, trial["lockout_starts"][0]])][0]
-                                trial["leave_rw"] = trial["lockout_starts"][0]
-                                trial["rw_end"] = trial["lockout_starts"][0]
-                                trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
+                                rw_impatience_lockout("rip", trial, rip, downtimesall, start_time)
                             # correctly visited wait but was impatient
                             elif len(valid_indices(wait,[start_time, trial["lockout_starts"][0]])) > 0:
-                                trial["trial_type"] = 2
-                                trial["lockout_type"] = 3
-                                trial["rw_start"] = wait[valid_indices(wait, [start_time, trial["lockout_starts"][0]])][0]
-                                trial["leave_rw"] = trial["lockout_starts"][0]
-                                trial["rw_end"] = trial["lockout_starts"][0]
-                                trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
+                                rw_impatience_lockout("wait", trial, wait, downtimesall, start_time)
                 # COMPLETE TRIAL no lockouts
                 else:
                     trial["rw_success"] = 1
@@ -298,24 +262,9 @@ class V8TrialParser(TrialParser):
                         trial["outer_success"] = 1
                     
                     if len(valid_indices(rip, [start_time, end_time-.001])): # rip trial -.001 to catch trodes freeze trials
-                        trial["trial_type"] = 1 # type=rip
-                        trial["rw_start"] = rip[valid_indices(rip, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
-                        trial["rw_end"] = ripends[valid_indices(ripends, [start_time, end_time])][0]
-                        trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
-                        trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
-                        #those trials when he gets click/beep just as he leaves
-                        if (trial["rw_end"] - trial["leave_rw"] < .3) and (trial["rw_end"] - trial["leave_rw"] > 0):
-                            trial["leave_rw"] = trial["rw_end"]
-                        
+                        rw_normal("rip", trial, start_time, end_time, rip, ripends, downtimesall)
                     elif len(valid_indices(wait, [start_time, end_time-.001])): # wait trial
-                        trial["trial_type"] = 2 # type=wait
-                        trial["rw_start"] = wait[valid_indices(wait, [start_time, end_time])][0] # PROBLEM LINE!! RWstart > RWend
-                        trial["rw_end"] = waitends[valid_indices(waitends, [start_time, end_time])][0]
-                        trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
-                        trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start_time, trial["rw_start"]])][-1]
-                        #those trials when he gets click/beep just as he leaves
-                        if (trial["rw_end"] - trial["leave_rw"] < .3) and (trial["rw_end"] - trial["leave_rw"] > 0):
-                            trial["leave_rw"] = trial["rw_end"]
+                        rw_normal("wait", trial, start_time, end_time, wait, waitends, downtimesall)
                 
                 # sanity checks:
                 assert(trial["start_time"] < trial["leave_home"])
@@ -357,6 +306,58 @@ class V8TrialParser(TrialParser):
 
 
 # HELPER FUNCTIONS
+
+# TODO replace existing sections in __parse_trials with these:
+def rw_normal(rw_type, trial, start, end, events, event_ends, downtimesall):
+    """
+    rw_type: str, "rip" or "wait"
+    trial: df, the current trial dictionary being populated
+    events: rip or wait
+    event_ends: ripends or waitends
+    """
+    trial_type = 1 if rw_type == "rip" else 2
+    trial["trial_type"] = trial_type
+    trial["rw_start"] = events[valid_indices(events, [start, end])][0]
+    trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0]
+    trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
+    trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start, trial["rw_start"]])][-1]
+    #those trials when he gets click/beep just as he leaves
+    if (trial["rw_end"] - trial["leave_rw"] < .3) and (trial["rw_end"] - trial["leave_rw"] > 0):
+        trial["leave_rw"] = trial["rw_end"]
+
+def rw_lockout(rw_type, trial, start, end, events, event_ends, downtimesall):
+    trial_type = 1 if rw_type == "rip" else 2
+    trial["trial_type"] = trial_type
+    trial["rw_start"] = events[valid_indices(events, [start, trial["lockout_starts"][0]-.1])][0]
+    trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start, trial["rw_start"]])][-1]
+    trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0]
+    trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
+    # those trials when he gets click/beep just as he leaves
+    if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
+        trial["leave_rw"] = trial["rw_end"]
+    
+def outerwell_lockout(trial, outer, start, downtimesall, downwellsall, goalrec):
+    trial["outer_time"] = outer[valid_indices(outer[:, 0], [start, trial["lockout_starts"][0]-.1])[0], 0]
+    trial["outer_well"] = outer[valid_indices(outer[:, 0], [start, trial["lockout_starts"][0]-.1])[0], 1]
+    trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
+    if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
+        trial["goal_well"] = trial["outer_well"]
+        trial["outer_success"] = 1
+
+def rw_mismatch_lockout(rw_type, trial, downtimesall, downwellsall, start):
+    trial_type = 1 if rw_type == "rip" else 2
+    trial["trial_type"] = trial_type
+    trial["lockout_type"] = 2
+    trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start) & (downtimesall < trial["lockout_starts"][0])][-1]
+
+def rw_impatience_lockout(rw_type, trial, events, downtimesall, start):
+    trial_type = 1 if rw_type == "rip" else 2
+    trial["trial_type"] = trial_type
+    trial["lockout_type"] = 3
+    trial["rw_start"] = events[valid_indices(events, [start, trial["lockout_starts"][0]])][0]
+    trial["leave_rw"] = trial["lockout_starts"][0]
+    trial["rw_end"] = trial["lockout_starts"][0]
+    trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start, trial["rw_start"]])][-1]
 
 def valid_indices(values, bounds):
     """
