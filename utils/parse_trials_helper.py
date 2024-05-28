@@ -56,26 +56,37 @@ class V8TrialParser(TrialParser):
         return events_df
 
     @staticmethod
-    def plot_trials(df, session, epoch_num, return_fig=False):
-        trialtype = df["trial_type"].to_numpy()
-        RWstart = df["rw_start"].to_numpy()
-        RWend = df["rw_end"].to_numpy()
-        outertime = df["outer_time"].to_numpy()
-        outerwell = df["outer_well"].to_numpy()
-        goalwell = df["goal_well"].to_numpy()
+    def plot_trials(df, session, epoch_num, start, end, return_fig=False):
+        """Plots trial-by-trial behavioral data
 
-        lockstarts = list(itertools.chain(*list(df["lockout_starts"])))
-        lockends = list(itertools.chain(*list(df["lockout_ends"])))
+        Params:
+        - start, end: starting and end indices for trials to be included in the plot.
+        """
+        if start < 0 or end > len(df):
+            print(f"Invalid interval ({start}, {end}) for dataframe of length {len(df)}")
+            return
+        if end is None:
+            end = len(df)
+        trial_num = df["trial_num"].to_numpy()[start:end]
+        trialtype = df["trial_type"].to_numpy()[start:end]
+        RWstart = df["rw_start"].to_numpy()[start:end]
+        RWend = df["rw_end"].to_numpy()[start:end]
+        outertime = df["outer_time"].to_numpy()[start:end]
+        outerwell = df["outer_well"].to_numpy()[start:end]
+        goalwell = df["goal_well"].to_numpy()[start:end]
+
+        lockstarts = list(itertools.chain(*list(df["lockout_starts"][start:end])))
+        lockends = list(itertools.chain(*list(df["lockout_ends"][start:end])))
         
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10,10))
         
         ax1.set_title("Landmark times")
-        ax1.set_xlim(df["start_time"].iat[0], df["end_time"].iat[-1])
+        ax1.set_xlim(df["start_time"].iat[start], df["end_time"].iat[end-1])
         ax1.set_xlabel("Time (ms)")
         ax1.set_ylim(-1, 3)
         ax1.set_yticks([])
-        ax1.plot(df["start_time"], np.zeros(len(df["start_time"])), "b|")
-        ax1.plot(df["leave_home"], np.zeros(len(df["start_time"])), "r|")
+        ax1.plot(df["start_time"][start:end], np.zeros(len(df["start_time"][start:end])), "b|")
+        ax1.plot(df["leave_home"][start:end], np.zeros(len(df["start_time"][start:end])), "r|")
         ax1.plot(RWstart[np.where(trialtype==1)[0]], np.ones(sum(trialtype==1)), "g*")
         ax1.plot(RWstart[np.where(trialtype==2)[0]], np.ones(sum(trialtype==2)), "b*")
         ax1.plot(RWend[np.where(trialtype==1)[0]], np.ones(sum(trialtype==1)), "g.")
@@ -102,14 +113,16 @@ class V8TrialParser(TrialParser):
         )
         
         ax2.set_title("Goal well visits")
-        ax2.set_xlim(df["start_time"].iat[0], df["end_time"].iat[-1])
-        ax2.set_xlabel("Time (ms)")
+        ax2.set_xlim(trial_num[0], trial_num[-1])
+        ax2.set_xlabel("Trial")
         ax2.set_ylabel("Well number")
-        ax2.plot(outertime[np.equal(outerwell, goalwell).nonzero()[0]], outerwell[np.equal(outerwell, goalwell).nonzero()[0]], "m*")
-        ax2.plot(outertime[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], "mo")
-        ax2.plot(df["leave_outer"], df["outer_well"], "m|")
+        ax2.plot(trial_num[np.equal(outerwell, goalwell).nonzero()[0]], outerwell[np.equal(outerwell, goalwell).nonzero()[0]], "m*")
+        ax2.plot(trial_num[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], "mo")
+        #ax2.plot(df["leave_outer"][start:end], df["outer_well"][start:end], "m|")
         ax2.legend(["goal well arms", "non-goal well arms"])
         fig.suptitle(f"{session}, epoch {epoch_num}", fontsize=16)
+
+        ax2.grid()
 
         if return_fig:
             return plt.gcf()
@@ -151,7 +164,7 @@ class V8TrialParser(TrialParser):
         ripends = dataArray[dataArray[:,1]=="BEEP1",0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # filter to timestamps that weren't repeat pokes        
-        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1
+        nonrepinds = np.where(np.diff(upwellsall, prepend=0) != 0)[0] + 1
         homeindsall = np.where(upwellsall == int(self.diomap["homebeam"]))[0]
         # include home pokes that followed a lockout
         afterlockinds = np.intersect1d(lookup(lockends, uptimesall), homeindsall)
@@ -165,7 +178,7 @@ class V8TrialParser(TrialParser):
         wait = uptimes[upwells == int(self.diomap["Wbeam"])]
         outer = np.array([uptimes[upwells > 3], upwells[upwells > 3]]) # specify that 3 is the first outerwell
         # filter goal records to only count times where goalcount increased
-        goalrec = goalcounttimes[np.where(np.diff(goalcount) > 0)[0] + 1]
+        goalrec = goalcounttimes[np.where(np.diff(goalcount, prepend=0) > 0)[0] + 1]
 
         return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
 
