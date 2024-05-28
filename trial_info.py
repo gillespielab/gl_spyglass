@@ -158,7 +158,9 @@ def get_dio_mapping(key, nwbf):
     dio_obj_ids = (DIOEvents & {"nwb_file_name": key["nwb_file_name"]}).fetch("dio_object_id")
     for id in dio_obj_ids:
         dio_obj = nwbf.objects[id]
-        diomap[dio_obj.name] = dio_obj.description[-1]
+        desc = dio_obj.description
+        chan_num = re.search(r'\d+', desc).group()
+        diomap[dio_obj.name] = chan_num
     return diomap
 
 def get_sc_descriptors(sc_text):
