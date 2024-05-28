@@ -164,7 +164,7 @@ class V8TrialParser(TrialParser):
         ripends = dataArray[dataArray[:,1]=="BEEP1",0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # filter to timestamps that weren't repeat pokes        
-        nonrepinds = np.where(np.diff(upwellsall, prepend=0) != 0)[0] + 1
+        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1
         homeindsall = np.where(upwellsall == int(self.diomap["homebeam"]))[0]
         # include home pokes that followed a lockout
         afterlockinds = np.intersect1d(lookup(lockends, uptimesall), homeindsall)
@@ -173,12 +173,22 @@ class V8TrialParser(TrialParser):
         upwells = upwellsall[valid_poke_mask]
 
         # get timestamps where home, rip, wait, and outer wells were visited
-        home = uptimes[upwells == int(self.diomap["homebeam"])]
-        rip = uptimes[upwells == int(self.diomap["Rbeam"])]
-        wait = uptimes[upwells == int(self.diomap["Wbeam"])]
-        outer = np.array([uptimes[upwells > 3], upwells[upwells > 3]]) # specify that 3 is the first outerwell
+        home_label = int(self.diomap["homebeam"])
+        rip_label = int(self.diomap["Rbeam"])
+        wait_label = int(self.diomap["Wbeam"])
+        arm1_label = int(self.diomap["arm1beam"])
+        
+        home = uptimes[upwells == home_label]
+        rip = uptimes[upwells == rip_label]
+        wait = uptimes[upwells == wait_label]
+
+        outer_mask = (upwells >= arm1_label)
+        if home_label > arm1_label:
+            outer_mask = (upwells >= arm1_label) & (upwells < home_label)
+
+        outer = np.array([uptimes[outer_mask], upwells[outer_mask]])
         # filter goal records to only count times where goalcount increased
-        goalrec = goalcounttimes[np.where(np.diff(goalcount, prepend=0) > 0)[0] + 1]
+        goalrec = goalcounttimes[np.where(np.diff(goalcount) > 0)[0] + 1]
 
         return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
 
@@ -248,7 +258,7 @@ class V8TrialParser(TrialParser):
                         trial["rw_success"] = 0
                         #if he locks out by going straight out (locktype1 order error)
                         if len(valid_indices(outer[0], [start_time, trial["lockout_starts"][0]])):
-                            trial["leave_home"] = downtimesall[(downtimesall == 1) & (downtimesall >= start_time) & downtimesall < trial["lockout_starts"]][-1]
+                            trial["leave_home"] = downtimesall[(downtimesall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
                             trial["lockout_type"] = 1
                             trial["trial_type"] = 0 # type=error, cannot define r or w
                         else:
@@ -328,10 +338,11 @@ def rw_normal(rw_type, trial, start, end, events, event_ends, downtimesall):
     events: rip or wait
     event_ends: ripends or waitends
     """
+
     trial_type = 1 if rw_type == "rip" else 2
     trial["trial_type"] = trial_type
     trial["rw_start"] = events[valid_indices(events, [start, end])][0]
-    trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0]
+    trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0] 
     trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
     trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start, trial["rw_start"]])][-1]
     #those trials when he gets click/beep just as he leaves
@@ -350,8 +361,8 @@ def rw_lockout(rw_type, trial, start, end, events, event_ends, downtimesall):
         trial["leave_rw"] = trial["rw_end"]
     
 def outerwell_lockout(trial, outer, start, downtimesall, downwellsall, goalrec):
-    trial["outer_time"] = outer[valid_indices(outer[:, 0], [start, trial["lockout_starts"][0]-.1])[0], 0]
-    trial["outer_well"] = outer[valid_indices(outer[:, 0], [start, trial["lockout_starts"][0]-.1])[0], 1]
+    trial["outer_time"] = outer[0, valid_indices(outer[0], [start, trial["lockout_starts"][0]-.1])][0]
+    trial["outer_well"] = outer[1, valid_indices(outer[0], [start, trial["lockout_starts"][0]-.1])][0]
     trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
     if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
         trial["goal_well"] = trial["outer_well"]
@@ -378,9 +389,11 @@ def valid_indices(values, bounds):
     bounds (tuple): [lowerbound, upperbound]
     
     Returns new array containing indices i such that
-    where lowerbound <= values[i] < upperbound
+    where lowerbound <= values[i] <= upperbound
     """
-    return np.nonzero((values >= bounds[0]) & (values < bounds[1]))[0]
+    if bounds[0] > bounds[1]:
+        raise Exception("Invalid bounds provided to valid_indices: lowerbound cannot be higher than upperbound")
+    return np.nonzero((values >= bounds[0]) & (values <= bounds[1]))[0]
 
 def lookup(reference, target):
     """
