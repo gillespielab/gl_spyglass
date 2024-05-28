@@ -107,28 +107,31 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         trials_df = nwbf["trial_info"]
         return trials_df
     
-    def plot_trials(self):
+    def plot_trials(self, start=0, end=None):
         """
-        Visualize behavioral landmark information for a given epoch on a given day. 
+        Visualize trial-by-trial behavioral data for a given epoch on a given day. 
         Only valid when a single epoch is selected.
         Top plot: timestamps when certain landmarks were triggered
-        Bottom plot: history of outerwells visited
+        Bottom plot: history of outerwells visited.        
 
         Example:
         restr = {"nwb_file_name": "bobrick20231114_.nwb", "epoch": 4}
         (TrialInfo & restr).plot_trials()
         """
+
         num_tuples = self.fetch().size
         if num_tuples != 1:
             logger.info(f"Can only plot exactly 1 epoch, but {num_tuples} were given")
             return
 
         trials_df = self.fetch1_dataframe()
+        if end is None:
+            end = len(trials_df)
         session = (Session & self).fetch1("session_id")
         epoch = self.fetch1("epoch")
         task_name = (TaskEpoch & self).fetch1("task_name")
         if task_name == "Eight arm flexible spatial task":
-            V8TrialParser.plot_trials(trials_df, session, epoch)
+            V8TrialParser.plot_trials(trials_df, session, epoch, start, end)
         else:
             print(f"No parsing logic implemented for task: {task_name}")
 
