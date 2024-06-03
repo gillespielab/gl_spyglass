@@ -196,5 +196,8 @@ def get_sc_descriptors(sc_text):
             descriptors["num_goals"] = int(line[line.index("=") + 1:].strip())
         elif re.match(r"^(forageNum\s*=?).*", line):
             descriptors["forage_num"] = int(line[line.index("=") + 1:].strip())
+        
+        if not ("lockout_period" in descriptors.keys()):
+            raise Exception("No lockout period found in StateScriptLog")
 
     return descriptors
