@@ -14,7 +14,7 @@ class TrialParser(ABC):
 
 
 class V8TrialParser(TrialParser):
-    def __init__(self, script, diomap, time_offset, key):
+    def __init__(self, script, diomap, home_dio_times, key):
         """
         script (str): raw script from statescript log
         diomap (dict): map event names to their dio channel (e.g. {"homebeam": "Din1", ...})
@@ -23,7 +23,7 @@ class V8TrialParser(TrialParser):
         """
         self.script = script
         self.diomap = diomap
-        self.time_offset = time_offset
+        self.home_dio_times = home_dio_times
         self.key = key
         self.trials_df = None
 
@@ -134,6 +134,11 @@ class V8TrialParser(TrialParser):
         records of various behavioral landmarks (home well / center wells / outer well visits,
         start & end times of rip/wait trials, start & end times of lockouts, record of goals)
         """
+        home_label = int(self.diomap["homebeam"])
+        rip_label = int(self.diomap["Rbeam"])
+        wait_label = int(self.diomap["Wbeam"])
+        arm1_label = int(self.diomap["arm1beam"])
+
         # process statescript log
         lines = self.script.split("\n")
         data = [line.split(" ") for line in lines if len(line) > 0 and line[0] != "#"]
@@ -144,8 +149,12 @@ class V8TrialParser(TrialParser):
         up_mask = dataArray[:,1]=="UP"
         uptimesall = dataArray[up_mask,0].astype(int) / MILLISECONDS_PER_SECOND
         upwellsall = dataArray[up_mask,2].astype(int)
-        
-        offset = self.time_offset - uptimesall[upwellsall == 1][0] # DIO time = unix time (s), SC times = times since Trodes booted up (ms)
+        sc_home_times = uptimesall[upwellsall == home_label]
+
+        # TODO: choose the first valid homedio times to align to
+        event_idx = 1 # pick the homedio event timestamp that aligns with the first statescriptlog home timestamp
+        offset = self.home_dio_times[event_idx] - sc_home_times[0] # DIO time = unix time (s), SC times = times since Trodes booted up (ms)
+        #offset = self.__get_time_offset(sc_home_times)
         uptimesall = uptimesall + offset
 
         down_mask = dataArray[:,1]=="DOWN"
@@ -166,31 +175,26 @@ class V8TrialParser(TrialParser):
         ripends = dataArray[dataArray[:,1]=="BEEP1",0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # filter to timestamps that weren't repeat pokes        
-        nonrepinds = np.where(np.diff(upwellsall) != 0)[0] + 1
-        homeindsall = np.where(upwellsall == int(self.diomap["homebeam"]))[0]
+        nonrepinds = np.where(np.diff(upwellsall, prepend=0) != 0)[0] #add prepend?
+
         # include home pokes that followed a lockout
+        homeindsall = np.where(upwellsall == home_label)[0]
         afterlockinds = np.intersect1d(lookup(lockends, uptimesall), homeindsall)
         valid_poke_mask = np.concatenate((nonrepinds, afterlockinds))
         uptimes = uptimesall[valid_poke_mask]
         upwells = upwellsall[valid_poke_mask]
 
         # get timestamps where home, rip, wait, and outer wells were visited
-        home_label = int(self.diomap["homebeam"])
-        rip_label = int(self.diomap["Rbeam"])
-        wait_label = int(self.diomap["Wbeam"])
-        arm1_label = int(self.diomap["arm1beam"])
-        
         home = uptimes[upwells == home_label]
         rip = uptimes[upwells == rip_label]
         wait = uptimes[upwells == wait_label]
-
         outer_mask = (upwells >= arm1_label)
-        if home_label > arm1_label:
+        if home_label > arm1_label: # TODO: eliminate assumption that outer arm dio channels are consecutive
             outer_mask = (upwells >= arm1_label) & (upwells < home_label)
 
-        outer = np.array([uptimes[outer_mask], upwells[outer_mask]])
+        outer = np.array([uptimes[outer_mask], upwells[outer_mask] - arm1_label + 1]) # convert dio channel to arm number
         # filter goal records to only count times where goalcount increased
-        goalrec = goalcounttimes[np.where(np.diff(goalcount) > 0)[0] + 1]
+        goalrec = goalcounttimes[np.where(np.diff(goalcount, prepend=0) > 0)[0]]
 
         return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
 
@@ -248,8 +252,8 @@ class V8TrialParser(TrialParser):
                         
                         # also completed outer successfully (lockedout on way home, ie by going to r/w), still considered locktype1, order error
                         if len(valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])) > 0:
-                            trial["outer_time"] = outer[valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])[0], 0]
-                            trial["outer_well"] = outer[valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])[0], 1]
+                            trial["outer_time"] = outer[0, valid_indices(outer[0], [start_time, trial["lockout_starts"][0]-.1])[0]]
+                            trial["outer_well"] = outer[1, valid_indices(outer[0], [start_time, trial["lockout_starts"][0]-.1])[0]]
                             trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
                             if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
                                 trial["goal_well"] = trial["outer_well"]
@@ -329,10 +333,23 @@ class V8TrialParser(TrialParser):
 
         return trial_df
 
+    def __get_time_offset(self, sc_home_times):
+        # finds the offset that best aligns the first 4 sc timestamps to dio times
+        for event_idx in range(4):
+            # for each of the first 4 sc timestamps, calculate the mismatch from their nearest dio time
+            offset = self.home_dio_times[event_idx] - sc_home_times[0]
+            mismatch = 0
+            for i in range(4): 
+                target = sc_home_times[i] + offset
+                diffs = np.absolute(self.home_dio_times[:10] - target)
+                mismatch += np.min(diffs)
+            # mismatch score: sum of misses for first 4 sc timestamps
+            if mismatch < 1: 
+                return offset
+            
 
 # HELPER FUNCTIONS
 
-# TODO replace existing sections in __parse_trials with these:
 def rw_normal(rw_type, trial, start, end, events, event_ends, downtimesall):
     """
     rw_type: str, "rip" or "wait"
@@ -395,12 +412,12 @@ def valid_indices(values, bounds):
     """
     if bounds[0] > bounds[1]:
         raise Exception("Invalid bounds provided to valid_indices: lowerbound cannot be higher than upperbound")
-    return np.nonzero((values >= bounds[0]) & (values <= bounds[1]))[0]
+    return np.nonzero((values >= bounds[0]) & (values < bounds[1]))[0]
 
 def lookup(reference, target):
     """
     For each timestamp t in reference, returns the list of indices i where target[i] is
-    the lowest timsteamp greater than reference[t].
+    the lowest timestamp greater than reference[t].
 
     Assumes reference and target are 1D ndarrays containing monotonically increasing values (timestamps).
     """

@@ -49,7 +49,6 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         if home_times.size == 0:
             logger.info(f"Skipping epoch: No home dio events detected for {nwb_file_name}, epoch {epoch_num}")
             return
-        first_home_time = home_times[0]
         
         # get dio mapping for arms
         dio_map = get_dio_mapping(key, nwbf)
@@ -64,7 +63,7 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         task_name = (TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("task_name")
         if task_name == "Eight arm flexible spatial task":
             key["parser"] = "V8_delay"
-            parser = V8TrialParser(sc.content, dio_map, first_home_time, key)
+            parser = V8TrialParser(sc.content, dio_map, home_times, key)
         elif task_name == "Sleep": # just in case
             logger.info(f"Skipping sleep epoch: {nwb_file_name}, epoch {epoch_num}")
             return 
@@ -197,7 +196,7 @@ def get_sc_descriptors(sc_text):
         elif re.match(r"^(forageNum\s*=?).*", line):
             descriptors["forage_num"] = int(line[line.index("=") + 1:].strip())
         
-    if not "lockout_period" in descriptors.keys():
-        raise Exception("No lockout period found in StateScriptLog")
+    # if not "lockout_period" in descriptors.keys():
+    #     raise Exception("No lockout period found in StateScriptLog")
 
     return descriptors
