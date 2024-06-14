@@ -152,9 +152,7 @@ class V8TrialParser(TrialParser):
         sc_home_times = uptimesall[upwellsall == home_label]
 
         # TODO: choose the first valid homedio times to align to
-        event_idx = 1 # pick the homedio event timestamp that aligns with the first statescriptlog home timestamp
-        offset = self.home_dio_times[event_idx] - sc_home_times[0] # DIO time = unix time (s), SC times = times since Trodes booted up (ms)
-        #offset = self.__get_time_offset(sc_home_times)
+        offset = self.__get_time_offset(sc_home_times)
         uptimesall = uptimesall + offset
 
         down_mask = dataArray[:,1]=="DOWN"
@@ -332,19 +330,20 @@ class V8TrialParser(TrialParser):
                 trial_df["goal_well"].iat[t-1] = trial_df["goal_well"].iat[t]
 
         return trial_df
-
+    
     def __get_time_offset(self, sc_home_times):
         # finds the offset that best aligns the first 4 sc timestamps to dio times
+        # DIO time = unix time (s), SC times = time since Trodes booted up (ms)
         for event_idx in range(4):
-            # for each of the first 4 sc timestamps, calculate the mismatch from their nearest dio time
             offset = self.home_dio_times[event_idx] - sc_home_times[0]
+            # mismatch score: sum of differences between the first 4 sc timestamps and their closest dio timestamp
             mismatch = 0
             for i in range(4): 
                 target = sc_home_times[i] + offset
-                diffs = np.absolute(self.home_dio_times[:10] - target)
-                mismatch += np.min(diffs)
-            # mismatch score: sum of misses for first 4 sc timestamps
-            if mismatch < 1: 
+                lim = sc_home_times[4] + offset
+                diffs = np.absolute(self.home_dio_times[self.home_dio_times < lim] - target)
+                mismatch += np.min(diffs) # dio home time that was closest to the target sc home time
+            if mismatch < 0.1: # if below threshold, return the offset for aligning timestamps
                 return offset
             
 
