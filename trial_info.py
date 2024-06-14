@@ -1,16 +1,12 @@
 import datajoint as dj
 from spyglass.utils import logger
-from spyglass.common.common_task import TaskEpoch
-from spyglass.common.common_dio import DIOEvents
+import spyglass.common as sgc
 from spyglass.common.common_behav import StateScriptFile
-from spyglass.common.common_interval import IntervalList
-from spyglass.common.common_session import Session
+from spyglass.common.common_dio import DIOEvents
+from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.utils.nwb_helper_fn import get_nwb_file
-from spyglass.common.common_nwbfile import Nwbfile
-from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.utils.dj_mixin import SpyglassMixin
-
-from utils.parse_trials_helper import V8TrialParser
+from gl_spyglass_tables.utils.parse_trials_helper import V8TrialParser
 import numpy as np
 import re
 
@@ -45,7 +41,7 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         # get first home poke time of the epoch for calculating trodes to ptp time offset
         nwb_file_name = key["nwb_file_name"]
         epoch_num = key["epoch"]
-        home_times = get_homebeam_times(key, nwbf)
+        home_times = get_beam_times(key, nwbf, "homebeam")
         if home_times.size == 0:
             logger.info(f"Skipping epoch: No home dio events detected for {nwb_file_name}, epoch {epoch_num}")
             return
@@ -53,14 +49,13 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         # get dio mapping for arms
         dio_map = get_dio_mapping(key, nwbf)
         
-        # get statescript log contents and get descriptors
+        # get statescriptlog contents and get descriptors
         file_id = (StateScriptFile & key).fetch1("file_object_id")
         sc = nwbf.objects[file_id]
         key["descriptors"] = get_sc_descriptors(sc.content)
 
-        # parse statescript log according to the task type 
-        # (currently there's only the V8, but future variants will be added here)
-        task_name = (TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("task_name")
+        # parse statescript log according to the task type (currently there's only the V8, but future variants will be added here)
+        task_name = (sgc.TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("task_name")
         if task_name == "Eight arm flexible spatial task":
             key["parser"] = "V8_delay"
             parser = V8TrialParser(sc.content, dio_map, home_times, key)
@@ -74,7 +69,7 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         trials_df = parser.parse_trials()
 
         # insert parsed trial info into analysis nwb file
-        session = (Session & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("session_id")
+        session = (sgc.Session & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("session_id")
         nwb_analysis_file = AnalysisNwbfile()
         key["analysis_file_name"] = nwb_analysis_file.create(key["nwb_file_name"])
         key["trial_info_object_id"] = nwb_analysis_file.add_nwb_object(
@@ -126,30 +121,29 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         trials_df = self.fetch1_dataframe()
         if end is None:
             end = len(trials_df)
-        session = (Session & self).fetch1("session_id")
+        session = (sgc.Session & self).fetch1("session_id")
         epoch = self.fetch1("epoch")
-        task_name = (TaskEpoch & self).fetch1("task_name")
+        task_name = (sgc.TaskEpoch & self).fetch1("task_name")
         if task_name == "Eight arm flexible spatial task":
             V8TrialParser.plot_trials(trials_df, session, epoch, start, end)
         else:
             print(f"No parsing logic implemented for task: {task_name}")
 
-def get_homebeam_times(key, nwbf):
+def get_beam_times(key, nwbf, beam):
     # get homebeam dio event timestamps
     dio_obj_id = (
-        DIOEvents & {"nwb_file_name": key["nwb_file_name"], "dio_event_name": "homebeam"}
+        sgc.DIOEvents & {"nwb_file_name": key["nwb_file_name"], "dio_event_name": beam}
     ).fetch1("dio_object_id")
-    homedios = nwbf.objects[dio_obj_id]
-    homediotimesall = np.asarray(homedios.timestamps)
+    dios = nwbf.objects[dio_obj_id]
+    diotimesall = np.asarray(dios.timestamps)
 
     # get timestamp of 1st homewell trigger the given epoch to calculate time offset
-    epoch_name = (TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("interval_list_name")
+    epoch_name = (sgc.TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("interval_list_name")
     epoch_valid_times = ( # gets time bounds of epoch
-        IntervalList & {"nwb_file_name" : key["nwb_file_name"], "interval_list_name": epoch_name}
+        sgc.IntervalList & {"nwb_file_name" : key["nwb_file_name"], "interval_list_name": epoch_name}
     ).fetch1("valid_times")
     start_time, end_time = epoch_valid_times.squeeze()
-    return homediotimesall[(homediotimesall >= start_time) & (homediotimesall < end_time)]
-
+    return diotimesall[(diotimesall >= start_time) & (diotimesall < end_time)]
 
 def get_dio_mapping(key, nwbf):
     # get dio mapping for arms
