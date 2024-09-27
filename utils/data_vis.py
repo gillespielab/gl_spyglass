@@ -23,10 +23,9 @@ def get_goal_fractions(df):
         block_start = goal_change_trials[i-1]
         block_end = goal_change_trials[i]
 
-        first_goal = block_start
-        while first_goal < block_end and not is_goal[first_goal]:
-            first_goal += 1 # increment until we find first goal trial within block
-        if first_goal < block_end:
+        slice = is_goal[block_start:block_end]
+        first_goal = np.argmax(slice) + block_start
+        if first_goal != block_start: # argmax = 0 if there were no goals
             first_goals.append(first_goal)
         
         counts_since_change = np.arange(1, block_end - block_start + 1)
