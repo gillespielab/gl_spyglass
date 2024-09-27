@@ -332,12 +332,14 @@ class V8TrialParser(TrialParser):
         return trial_df
     
     def __get_time_offset(self, sc_home_times):
-        # finds the offset that best aligns the first 4 sc timestamps to dio times
+        # finds the offset that best aligns the statescript homebeam times to dio home times
         # DIO time = unix time (s), SC times = time since Trodes booted up (ms)
-        for event_idx in range(4):
+        event_idx = 0
+        while event_idx < self.home_dio_times.size:
             offset = self.home_dio_times[event_idx] - sc_home_times[0]
             # mismatch score: sum of differences between the first 4 sc timestamps and their closest dio timestamp
             mismatch = 0
+            # using the first 4 sc homebeam times and calculating their mismatch to dio homebeams times
             for i in range(4): 
                 target = sc_home_times[i] + offset
                 lim = sc_home_times[4] + offset
@@ -345,6 +347,7 @@ class V8TrialParser(TrialParser):
                 mismatch += np.min(diffs) # dio home time that was closest to the target sc home time
             if mismatch < 0.1: # if below threshold, return the offset for aligning timestamps
                 return offset
+            event_idx += 1
             
 
 # HELPER FUNCTIONS
