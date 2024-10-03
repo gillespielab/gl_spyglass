@@ -151,7 +151,7 @@ class V8TrialParser(TrialParser):
         upwellsall = dataArray[up_mask,2].astype(int)
         sc_home_times = uptimesall[upwellsall == home_label]
 
-        # TODO: choose the first valid homedio times to align to
+        # choose which homedio times to align to
         offset = self.__get_time_offset(sc_home_times)
         uptimesall = uptimesall + offset
 
@@ -238,7 +238,7 @@ class V8TrialParser(TrialParser):
                 if len(valid_indices(lockstarts, [start_time, end_time])) > 0:
                     trial["lockout_starts"] = lockstarts[valid_indices(lockstarts, [start_time, end_time])].tolist()
                     trial["lockout_ends"] = lockends[valid_indices(lockends, [start_time, end_time])].tolist()
-                    trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist() # TODO: add uptimes in addition to wells
+                    trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist()
                     # completed rip or wait well succesfully
                     if len(valid_indices(ripends, [start_time, end_time])) > 0 or len(valid_indices(waitends, [start_time, end_time])) > 0:
                         trial["lockout_type"] = 1
@@ -320,6 +320,10 @@ class V8TrialParser(TrialParser):
                 trial["goal_well"] = 0
                 trial["rw_success"] = 0
 
+            # Assigning a type to empty lists to suprress hdmf parsing errors
+            trial["lockout_starts"] = np.array(trial["lockout_starts"], dtype=np.float64)
+            trial["lockout_ends"] = np.array(trial["lockout_ends"], dtype=np.float64)
+            trial["during_lockout"] = np.array(trial["during_lockout"], dtype=np.float64)
             trial_data.append(trial)
         
         trial_df = pd.DataFrame(trial_data)
