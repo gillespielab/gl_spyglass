@@ -14,7 +14,7 @@ class TrialParser(ABC):
 
 
 class V8TrialParser(TrialParser):
-    def __init__(self, script, diomap, home_dio_times, key):
+    def __init__(self, script, diomap, home_dio_times, key, new):
         """
         script (str): raw script from statescript log
         diomap (dict): map event names to their dio channel (e.g. {"homebeam": "Din1", ...})
@@ -26,6 +26,7 @@ class V8TrialParser(TrialParser):
         self.home_dio_times = home_dio_times
         self.key = key
         self.trials_df = None
+        self.new = new
 
     def parse_trials(self):
         """Return a dataframe containing the following trial metrics
@@ -47,6 +48,10 @@ class V8TrialParser(TrialParser):
         lockout_ends: blob       # end times of lockouts
         lockout_type: int        # type of error that caused lockout
         during_lockout: blob     # wells visited during lockout
+
+        IF 'NEW' (specific to 8Arm trial):
+        search_trial             # true if trial is search trial, false if repeat 
+
         """
         
         # script: contents of the epoch's statescript file
@@ -196,6 +201,29 @@ class V8TrialParser(TrialParser):
 
         return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
 
+    def __get_search_repeat(self, trial_df):
+        # classifies trials as search or repeat
+            # trials up to and including the first trial where reward is found are considered search
+            # then trials up to and including the first trial where goal arm is unrewarded are considered repeat
+        t = 0
+        while t < len(trial_df["search_trial"]):
+            i = t
+            while(i < len(trial_df["search_trial"]) and trial_df["outer_well"].iloc[i] != trial_df["goal_well"].iloc[i]):
+                trial_df["search_trial"].iloc[i] = True
+                i += 1
+            if i < len(trial_df["search_trial"]):
+                trial_df["search_trial"].iloc[i] = True
+                i += 1
+            while(i < len(trial_df["search_trial"]) and  trial_df["goal_well"].iloc[i] == trial_df["goal_well"].iloc[i-1]):
+                trial_df["search_trial"].iloc[i] = False
+                i += 1
+            if i < len(trial_df["search_trial"]):
+                trial_df["search_trial"].iloc[i] = False
+                i += 1
+            t = i 
+
+        return trial_df
+
     def __filter_events(self, home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec):
         """
         Filters parsed behavioral events for epoch based on task rules and stores results in a dataframe
@@ -209,7 +237,7 @@ class V8TrialParser(TrialParser):
         start_times = goodhome[:-1]
         end_times = goodhome[1:]
 
-        for t in range(len(goodhome) - 1):
+        for t in range(len(goodhome) - 1): 
             trial = dict(
                 trial_num=t+1,
                 start_time=start_times[t], 
@@ -230,6 +258,9 @@ class V8TrialParser(TrialParser):
                 during_lockout=[],
                 lockout_type=0,
             )
+            if self.new:
+                trial["search_trial"] = False
+            
             
             try:
                 start_time = trial["start_time"]
@@ -320,6 +351,9 @@ class V8TrialParser(TrialParser):
                 trial["goal_well"] = 0
                 trial["rw_success"] = 0
 
+                if self.new:
+                    trial["search_trial"] = False
+
             # Assigning a type to empty lists to suprress hdmf parsing errors
             trial["lockout_starts"] = np.array(trial["lockout_starts"], dtype=np.float64)
             trial["lockout_ends"] = np.array(trial["lockout_ends"], dtype=np.float64)
@@ -332,6 +366,9 @@ class V8TrialParser(TrialParser):
         for t in range(len(trial_df["goal_well"])-1, 0, -1):
             if trial_df["goal_well"].iat[t-1] == 0:
                 trial_df["goal_well"].iat[t-1] = trial_df["goal_well"].iat[t]
+
+        if self.new:
+            trial_df = self.__get_search_repeat(trial_df)
 
         return trial_df
     
@@ -352,6 +389,10 @@ class V8TrialParser(TrialParser):
             if mismatch < 0.1: # if below threshold, return the offset for aligning timestamps
                 return offset
             event_idx += 1
+
+    
+
+
             
 
 # HELPER FUNCTIONS
