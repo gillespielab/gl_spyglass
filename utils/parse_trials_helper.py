@@ -209,16 +209,16 @@ class V8TrialParser(TrialParser):
         while t < len(trial_df["search_trial"]):
             i = t
             while(i < len(trial_df["search_trial"]) and trial_df["outer_well"].iloc[i] != trial_df["goal_well"].iloc[i]):
-                trial_df["search_trial"].iloc[i] = True
+                trial_df["search_trial"].iat[i] = True
                 i += 1
             if i < len(trial_df["search_trial"]):
-                trial_df["search_trial"].iloc[i] = True
+                trial_df["search_trial"].iat[i] = True
                 i += 1
             while(i < len(trial_df["search_trial"]) and  trial_df["goal_well"].iloc[i] == trial_df["goal_well"].iloc[i-1]):
-                trial_df["search_trial"].iloc[i] = False
+                trial_df["search_trial"].iat[i] = False
                 i += 1
             if i < len(trial_df["search_trial"]):
-                trial_df["search_trial"].iloc[i] = False
+                trial_df["search_trial"].iat[i] = False
                 i += 1
             t = i 
 
@@ -274,6 +274,7 @@ class V8TrialParser(TrialParser):
                     if len(valid_indices(ripends, [start_time, end_time])) > 0 or len(valid_indices(waitends, [start_time, end_time])) > 0:
                         trial["lockout_type"] = 1
                         trial["rw_success"] = 1
+
                         if len(valid_indices(rip, [start_time, trial["lockout_starts"][0]-0.1])):
                             rw_lockout("rip", trial, start_time, end_time, rip, ripends, downtimesall)
                         elif len(valid_indices(wait, [start_time, trial["lockout_starts"][0]-.1])):
@@ -293,7 +294,7 @@ class V8TrialParser(TrialParser):
                         trial["rw_success"] = 0
                         #if he locks out by going straight out (locktype1 order error)
                         if len(valid_indices(outer[0], [start_time, trial["lockout_starts"][0]])):
-                            trial["leave_home"] = downtimesall[(downtimesall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
+                            trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
                             trial["lockout_type"] = 1
                             trial["trial_type"] = 0 # type=error, cannot define r or w
                         else:
