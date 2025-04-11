@@ -139,7 +139,19 @@ class V8TrialParser(TrialParser):
         wait_label = int(self.diomap["Wbeam"])
         arm1_label = int(self.diomap["arm1beam"])
 
-        # process statescript log
+        # Processing the statescript log: each row in the file contains a series of space-separated
+        # values that represent a behavioral event (see any of the .stateScriptLog files as an example).
+        # The categories below describe the format of rows we will use for parsing:
+        # ----------------------------------------------------------------------------------------
+        # - 2 numbers, "<timestamp> <event>"
+        #       <event> can be either LOCKEND, CLICK1, or BEEP1. These correspond to the end of lockouts,
+        #       and rip/wait events.
+        # - 3 numbers, "<timestamp> UP/DOWN <DIO>":
+        #       <DIO> is a number that maps to an arm on the maze (saved in self.diomap)
+        #       These rows indicate that the animal hit <DIO> UP/DOWN at <timestamp>.
+        # - <timestamp> <score> = <value>:
+        #       e.g. goalTotal = 15
+
         lines = self.script.split("\n")
         data = [line.split(" ") for line in lines if len(line) > 0 and line[0] != "#"]
         dataArray = np.array([d+[""]*(6-len(d)) for d in data])
@@ -151,7 +163,8 @@ class V8TrialParser(TrialParser):
         upwellsall = dataArray[up_mask,2].astype(int)
         sc_home_times = uptimesall[upwellsall == home_label]
 
-        # choose which homedio times to align to
+        # given the homebeam times in the statescript log vs. home DIO times in the nwb,
+        # we can calculate the offset between trodes vs. unix time.
         offset = self.__get_time_offset(sc_home_times)
         uptimesall = uptimesall + offset
 
@@ -167,13 +180,12 @@ class V8TrialParser(TrialParser):
         goalcount = dataArray[goalcount_mask,3].astype(int)
         goalcounttimes = dataArray[goalcount_mask,0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
-        # CHANGE BASED ON RAT
-        #TODO: consider optional param per subject
+        #TODO: be aware that the CLICK1=wait and BEEP1=rip assignment may be reversed for some subjects.
         waitends = dataArray[dataArray[:,1]=="CLICK1",0].astype(int) / MILLISECONDS_PER_SECOND + offset
         ripends = dataArray[dataArray[:,1]=="BEEP1",0].astype(int) / MILLISECONDS_PER_SECOND + offset
 
         # filter to timestamps that weren't repeat pokes        
-        nonrepinds = np.where(np.diff(upwellsall, prepend=0) != 0)[0] #add prepend?
+        nonrepinds = np.where(np.diff(upwellsall, prepend=0) != 0)[0]
 
         # include home pokes that followed a lockout
         homeindsall = np.where(upwellsall == home_label)[0]
@@ -256,26 +268,26 @@ class V8TrialParser(TrialParser):
                             if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
                                 trial["goal_well"] = trial["outer_well"]
                                 trial["outer_success"] = 1
-                    
+
                     # did not complete rip/wait successfully
                     else:
                         trial["rw_success"] = 0
-                        #if he locks out by going straight out (locktype1 order error)
+                        # if he locks out by going straight to an outer arm, skipping rip/wait
                         if len(valid_indices(outer[0], [start_time, trial["lockout_starts"][0]])):
-                            trial["leave_home"] = downtimesall[(downtimesall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
+                            trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
                             trial["lockout_type"] = 1
                             trial["trial_type"] = 0 # type=error, cannot define r or w
                         else:
-                            # lockout bc visited rip on a wait trial
+                            # if a lockout occurred immediately after rip/wait was visited, it was because either
+                            # the rip well was visited on a wait trial or vice versa
                             if len(valid_indices(rip,[trial["lockout_starts"][0]-.01, trial["lockout_starts"][0]])) > 0: # rip visit was the lock cause
                                 rw_mismatch_lockout("wait", trial, downtimesall, downwellsall) 
-                            # lockout bc visited wait on a rip trial
                             elif len(valid_indices(wait,[trial["lockout_starts"][0]-.01, trial["lockout_starts"][0]])) > 0: # wait visit was the lock cause
                                 rw_mismatch_lockout("rip", trial, downtimesall, downwellsall)
-                            # correctly visited rip but was impatient
+
+                            # if a lockout occurred sometime after rip/wait, it was due to an impatience error
                             elif len(valid_indices(rip,[start_time, trial["lockout_starts"][0]])) > 0:
                                 rw_impatience_lockout("rip", trial, rip, downtimesall, start_time)
-                            # correctly visited wait but was impatient
                             elif len(valid_indices(wait,[start_time, trial["lockout_starts"][0]])) > 0:
                                 rw_impatience_lockout("wait", trial, wait, downtimesall, start_time)
                 # COMPLETE TRIAL no lockouts
@@ -292,7 +304,7 @@ class V8TrialParser(TrialParser):
                         rw_normal("rip", trial, start_time, end_time, rip, ripends, downtimesall)
                     elif len(valid_indices(wait, [start_time, end_time-.001])): # wait trial
                         rw_normal("wait", trial, start_time, end_time, wait, waitends, downtimesall)
-                
+
                 # sanity checks:
                 assert(trial["start_time"] < trial["leave_home"])
                 assert(trial["rw_start"] <= trial["rw_end"])
@@ -320,7 +332,7 @@ class V8TrialParser(TrialParser):
                 trial["goal_well"] = 0
                 trial["rw_success"] = 0
 
-            # Assigning a type to empty lists to suprress hdmf parsing errors
+            # assigning a type to empty lists to suprress hdmf parsing errors
             trial["lockout_starts"] = np.array(trial["lockout_starts"], dtype=np.float64)
             trial["lockout_ends"] = np.array(trial["lockout_ends"], dtype=np.float64)
             trial["during_lockout"] = np.array(trial["during_lockout"], dtype=np.float64)
@@ -358,16 +370,21 @@ class V8TrialParser(TrialParser):
 
 def rw_normal(rw_type, trial, start, end, events, event_ends, downtimesall):
     """
-    rw_type: str, "rip" or "wait"
-    trial: df, the current trial dictionary being populated
-    events: rip or wait
-    event_ends: ripends or waitends
-    """
+    Records a normal visit to a rip/wait well in the trial record
 
+    Parameters:
+    rw_type (str): str, "rip" or "wait"
+    trial (pd.DataFrame): the current trial dictionary being populated
+    start (float): trial start time
+    end (float): trial end time
+    events (np.ndarray): start times of visits to the rip/wait well
+    event_ends (np.ndarray): times when the subject left the rip/wait well
+    """
     trial_type = 1 if rw_type == "rip" else 2
     trial["trial_type"] = trial_type
     trial["rw_start"] = events[valid_indices(events, [start, end])][0]
     trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0] 
+    # use the time of next outer arm visit as the upper bound to end of the rip/wait visit
     trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["outer_time"]])][-1]
     trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start, trial["rw_start"]])][-1]
     #those trials when he gets click/beep just as he leaves
@@ -375,17 +392,40 @@ def rw_normal(rw_type, trial, start, end, events, event_ends, downtimesall):
         trial["leave_rw"] = trial["rw_end"]
 
 def rw_lockout(rw_type, trial, start, end, events, event_ends, downtimesall):
+    """
+    Records a visit to the rip/wait well that included a lockout
+
+    Parameters:
+    rw_type (str): str, "rip" or "wait"
+    trial (pd.DataFrame): the current trial dictionary being populated
+    start (float): trial start time
+    end (float): trial end time
+    events (np.ndarray): start times of visits to the rip/wait well
+    event_ends (np.ndarray): times when the subject left the rip/wait well
+    """
     trial_type = 1 if rw_type == "rip" else 2
     trial["trial_type"] = trial_type
     trial["rw_start"] = events[valid_indices(events, [start, trial["lockout_starts"][0]-.1])][0]
     trial["leave_home"] = downtimesall[valid_indices(downtimesall, [start, trial["rw_start"]])][-1]
     trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0]
+    # use the time of the lockout as the upper bound to end of the rip/wait visit
     trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
     # those trials when he gets click/beep just as he leaves
-    if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
+    if (trial["rw_end"] - trial["leave_rw"]) < .3:
         trial["leave_rw"] = trial["rw_end"]
     
 def outerwell_lockout(trial, outer, start, downtimesall, downwellsall, goalrec):
+    """
+    Records a lockout visit to an outer well in the trial record
+
+    Parameters:
+    trial (pd.DataFrame): the current trial dictionary being populated
+    outer (Tuple[np.ndarray]): outer[0] = start times of visits to the outer wells, outer[1] = wells visited
+    start (float): trial start time
+    downtimesall (np.ndarray): times when the subject poked down into a well
+    downarmsall (np.ndarray): the well associated with the times above
+    goalrec (np.ndarray): goal times
+    """
     trial["outer_time"] = outer[0, valid_indices(outer[0], [start, trial["lockout_starts"][0]-.1])][0]
     trial["outer_well"] = outer[1, valid_indices(outer[0], [start, trial["lockout_starts"][0]-.1])][0]
     trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
@@ -394,12 +434,33 @@ def outerwell_lockout(trial, outer, start, downtimesall, downwellsall, goalrec):
         trial["outer_success"] = 1
 
 def rw_mismatch_lockout(rw_type, trial, downtimesall, downwellsall, start):
+    """
+    Handles trial where a lockout was triggered the the subject visiting rip/wait
+    on the wrong trial (e.g. visiting the rip well on a wait trial)
+
+    Parameters:
+    rw_type (str): str, "rip" or "wait"
+    trial (pd.DataFrame): the current trial dictionary being populated
+    downtimesall (np.ndarray): times when the subject poked down into a well
+    downarmsall (np.ndarray): the well associated with the times above
+    start (float): trial start time
+    """
     trial_type = 1 if rw_type == "rip" else 2
     trial["trial_type"] = trial_type
     trial["lockout_type"] = 2
     trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start) & (downtimesall < trial["lockout_starts"][0])][-1]
 
 def rw_impatience_lockout(rw_type, trial, events, downtimesall, start):
+    """
+    Handles trial where a lockout was triggered by the subject.
+
+    Parameters:
+    rw_type (str): str, "rip" or "wait"
+    trial (pd.DataFrame): the current trial dictionary being populated
+    downtimesall (np.ndarray): times when the subject poked down into a well
+    downarmsall (np.ndarray): the well associated with the times above
+    start (float): trial start time
+    """
     trial_type = 1 if rw_type == "rip" else 2
     trial["trial_type"] = trial_type
     trial["lockout_type"] = 3
@@ -410,9 +471,10 @@ def rw_impatience_lockout(rw_type, trial, events, downtimesall, start):
 
 def valid_indices(values, bounds):
     """
-    values (array/list of ints)
+    values (np.ndarray/list of ints)
     bounds (tuple): [lowerbound, upperbound]
-    
+
+    Just a shorthand for np.nonzero to avoid clogging up the main program.
     Returns new array containing indices i such that
     where lowerbound <= values[i] <= upperbound
     """
