@@ -34,6 +34,8 @@ class TrialInfo(SpyglassMixin, dj.Computed):
         if key["dio_event_name"] != "homebeam":
             return
 
+        print("im trying to make ")
+
         # retrieve nwb file object
         nwb_file_abspath = Nwbfile().get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -306,7 +308,7 @@ class TrialInfo8Arm(SpyglassMixin, dj.Computed):
         trials_df = nwbf["trial_info"]
         return trials_df
     
-    def plot_trials(self, start=0, end=None):
+    def plot_trials(self, start=0, end=None, com_trial_nums = np.zeros(shape = 0), ret_fig = False):
         """
         Visualize trial-by-trial behavioral data for a given epoch on a given day. 
         Only valid when a single epoch is selected.
@@ -330,7 +332,10 @@ class TrialInfo8Arm(SpyglassMixin, dj.Computed):
         epoch = self.fetch1("epoch")
         task_name = (sgc.TaskEpoch & self).fetch1("task_name")
         if task_name == "Eight arm flexible spatial task":
-            V8TrialParser.plot_trials(trials_df, session, epoch, start, end)
+            if len(com_trial_nums) == 0:
+                V8TrialParser.plot_trials(trials_df, session, epoch, start, end, return_fig = ret_fig)
+            else:
+                V8TrialParser.plot_com_trials(trials_df, session, epoch, start, end, com_trial_nums, return_fig = ret_fig)
         else:
             print(f"No parsing logic implemented for task: {task_name}")
 

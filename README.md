@@ -8,6 +8,7 @@ Features of TrialInfo8Arm
     - Labels trials as search or repeat
     - Finds lockout trials, and removes bug trials
 - Extendable design that will eventually support other tasks.
+    - (If a new table needs to be created (ex: 6-arm), a new schema needs to be implemented in `trial_info.py`, and a new parser in `parse_trials_helper.py`)
 - Wrapper function for plotting the trial context for some epoch
     - Option to display change of mind trials, or mark any subset of trials in the plot
  

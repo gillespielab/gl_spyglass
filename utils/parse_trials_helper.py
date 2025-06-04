@@ -4,6 +4,7 @@ import itertools
 import sys
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
+import math
 
 MILLISECONDS_PER_SECOND = 1000
 
@@ -124,12 +125,62 @@ class V8TrialParser(TrialParser):
         ax2.set_xlabel("Trial")
         ax2.set_ylabel("Well number")
         ax2.plot(trial_num[np.equal(outerwell, goalwell).nonzero()[0]], outerwell[np.equal(outerwell, goalwell).nonzero()[0]], "co")
-        ax2.plot(trial_num[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], "mo")
-        #ax2.plot(df["leave_outer"][start:end], df["outer_well"][start:end], "m|")
+        ax2.plot(trial_num[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], "mo")    
         ax2.legend(["goal well arms", "non-goal well arms"])
         fig.suptitle(f"{session}, epoch {epoch_num}", fontsize=16)
 
         ax2.grid(which="both")
+
+        if return_fig:
+            return plt.gcf()
+
+    @staticmethod
+    def plot_com_trials(df, session, epoch_num, start, end, com_trial_nums, return_fig=False):
+        """Plots trial-by-trial behavioral data
+
+        Params:
+        - start, end: starting and end indices for trials to be included in the plot.
+        """
+        if start < 0 or end > len(df):
+            print(f"Invalid interval ({start}, {end}) for dataframe of length {len(df)}")
+            return
+        if end is None:
+            end = len(df)
+        
+        com_trial_nums = np.array(com_trial_nums)
+        trial_num = df["trial_num"].to_numpy()[start:end]
+        trialtype = df["trial_type"].to_numpy()[start:end]
+        RWstart = df["rw_start"].to_numpy()[start:end]
+        RWend = df["rw_end"].to_numpy()[start:end]
+        outertime = df["outer_time"].to_numpy()[start:end]
+        outerwell = df["outer_well"].to_numpy()[start:end]
+        goalwell = df["goal_well"].to_numpy()[start:end]
+
+        lockstarts = list(itertools.chain(*list(df["lockout_starts"][start:end])))
+        lockends = list(itertools.chain(*list(df["lockout_ends"][start:end])))
+        
+        fig, ax = plt.subplots(figsize=(math.ceil(len(trial_num)/8),5))
+        
+        ax.set_title("Goal well visits")
+        ax.set_xlim(start, end)
+        ax.set_xticks(np.arange(start // 10 * 10, end, 10))
+        ax.set_xticks(trial_num, minor=True)
+        ax.set_xlabel("Trial")
+        ax.set_ylabel("Well number")
+        if len(com_trial_nums) != 0:
+            ax.plot(trial_num[np.equal(outerwell, goalwell).nonzero()[0]], outerwell[np.equal(outerwell, goalwell).nonzero()[0]], "co", alpha = .5)
+            ax.plot(trial_num[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], "mo", alpha = .5)
+            colors = ["c" if tn in trial_num[np.equal(outerwell, goalwell).nonzero()[0]] else "m" for tn in com_trial_nums]
+            ax.scatter(com_trial_nums, outerwell[com_trial_nums-1], facecolors=colors, zorder = 10, edgecolors='black')
+            ax.legend(["goal well arms", "non-goal well arms", "change of mind trials"])
+        else:
+            ax.plot(trial_num[np.equal(outerwell, goalwell).nonzero()[0]], outerwell[np.equal(outerwell, goalwell).nonzero()[0]], "co")
+            ax.plot(trial_num[np.not_equal(outerwell, goalwell).nonzero()[0]], outerwell[np.not_equal(outerwell, goalwell).nonzero()[0]], "mo")    
+        #ax2.plot(df["leave_outer"][start:end], df["outer_well"][start:end], "m|")
+            ax.legend(["goal well arms", "non-goal well arms"])
+        fig.suptitle(f"{session}, epoch {epoch_num}", fontsize=16)
+
+        ax.grid(which="both")
 
         if return_fig:
             return plt.gcf()
@@ -147,8 +198,15 @@ class V8TrialParser(TrialParser):
         # process statescript log
         lines = self.script.split("\n")
         data = [line.split(" ") for line in lines if len(line) > 0 and line[0] != "#"]
-        dataArray = np.array([d+[""]*(6-len(d)) for d in data])
+        # bug fix, 5/8/25 -- changed from extending to length 6 to extending to length 8
+        #   When there are multiple goals, the lines can be longer than 6 without any extension, meaning that the array is 
+        #   inhomogenous and numpy doesn't like that 
+        dataArray = np.array([d+[""]*(8-len(d)) for d in data], dtype=list)
         descriptors = self.key["descriptors"]
+
+        # If lockout period wasn't set in the StateScript, we have to manually calculate it 
+        if "lockout_period" not in descriptors.keys():
+            self.key["descriptors"]["lockout_period"] = calculate_lockout_period(dataArray)
 
         # initialize uptimesall, downtimesall, lockends, lockstarts, goalcount, goalcounttimes, waitends, ripends
         up_mask = dataArray[:,1]=="UP"
@@ -165,8 +223,10 @@ class V8TrialParser(TrialParser):
         downwellsall = dataArray[down_mask,2].astype(int)
         
         lockend_mask = dataArray[:,1]=="LOCKEND"
+        # These have the correct number of lockouts 
         lockends = dataArray[lockend_mask,0].astype(int) / MILLISECONDS_PER_SECOND + offset
         lockstarts = lockends - descriptors["lockout_period"]  # e.g lockout_period= 30.0
+        
         
         goalcount_mask = dataArray[:,1]=="goalTotal"
         goalcount = dataArray[goalcount_mask,3].astype(int)
@@ -183,7 +243,8 @@ class V8TrialParser(TrialParser):
         # include home pokes that followed a lockout
         homeindsall = np.where(upwellsall == home_label)[0]
         afterlockinds = np.intersect1d(lookup(lockends, uptimesall), homeindsall)
-        valid_poke_mask = np.concatenate((nonrepinds, afterlockinds))
+        # Bug fix 5/1/25 -- nonrepinds and afterlockinds may have overlap, results in non-sequential trials and double counting
+        valid_poke_mask = np.unique(np.concatenate((nonrepinds, afterlockinds)).astype(int))
         uptimes = uptimesall[valid_poke_mask]
         upwells = upwellsall[valid_poke_mask]
 
@@ -228,9 +289,13 @@ class V8TrialParser(TrialParser):
         """
         Filters parsed behavioral events for epoch based on task rules and stores results in a dataframe
         """
+        # print(len(home))
         
         # only use start times that are NOT within 0.3 s of a lockstart
-        goodhome = home[goodhome_filter(home, lockstarts)]
+        # print(goodhome_filter(home, lockstarts))
+        goodhome = home[goodhome_filter(home, lockstarts, lockends)]
+        home_label = int(self.diomap["homebeam"])
+        # print(len(goodhome))
 
         # initialize dataframe to be populated
         trial_data = []
@@ -265,13 +330,14 @@ class V8TrialParser(TrialParser):
             try:
                 start_time = trial["start_time"]
                 end_time = trial["end_time"]
-                # error trials
+                # error trials -- if there is a lockstart recorded within this trial 
                 if len(valid_indices(lockstarts, [start_time, end_time])) > 0:
                     trial["lockout_starts"] = lockstarts[valid_indices(lockstarts, [start_time, end_time])].tolist()
                     trial["lockout_ends"] = lockends[valid_indices(lockends, [start_time, end_time])].tolist()
+                    # Any time there is a lockout, every upwell after is during lockout ?
                     trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist()
-                    # completed rip or wait well succesfully
-                    if len(valid_indices(ripends, [start_time, end_time])) > 0 or len(valid_indices(waitends, [start_time, end_time])) > 0:
+                    # completed rip or wait well succesfully 
+                    if len(valid_indices(ripends, [start_time, trial["lockout_starts"][0]-.1])) > 0 or len(valid_indices(waitends, [start_time, trial["lockout_starts"][0]-.1])) > 0:
                         trial["lockout_type"] = 1
                         trial["rw_success"] = 1
 
@@ -294,7 +360,9 @@ class V8TrialParser(TrialParser):
                         trial["rw_success"] = 0
                         #if he locks out by going straight out (locktype1 order error)
                         if len(valid_indices(outer[0], [start_time, trial["lockout_starts"][0]])):
-                            trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
+                            # Bug fix 5/14/25 --
+                            # Changed from 1 to 'home_label' - this was the line that is causing a lot of bug trials that should just be lockouts 
+                            trial["leave_home"] = downtimesall[(downwellsall == home_label) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
                             trial["lockout_type"] = 1
                             trial["trial_type"] = 0 # type=error, cannot define r or w
                         else:
@@ -313,6 +381,8 @@ class V8TrialParser(TrialParser):
                 # COMPLETE TRIAL no lockouts
                 else:
                     trial["rw_success"] = 1
+                    # The bug trials on this line means that we didn't record a lockout, but we also don't have any outer well visits
+                    # This is likely an actual bug in the recording of trials, and will be saved as such 
                     trial["outer_time"] = outer[0, valid_indices(outer[0], [start_time, end_time])][0]
                     trial["outer_well"] = outer[1, valid_indices(outer[0], [start_time, end_time])][0]
                     trial["leave_outer"] = downtimesall[valid_indices(downtimesall, [trial["outer_time"], end_time])][-1]
@@ -326,16 +396,16 @@ class V8TrialParser(TrialParser):
                         rw_normal("wait", trial, start_time, end_time, wait, waitends, downtimesall)
                 
                 # sanity checks:
-                assert(trial["start_time"] < trial["leave_home"])
-                assert(trial["rw_start"] <= trial["rw_end"])
-                assert(trial["rw_end"] <= trial["leave_rw"])
-                assert(trial["outer_time"] <= trial["leave_outer"])
+                assert (trial["start_time"] < trial["leave_home"]), "leave home <= start time"
+                assert(trial["rw_start"] <= trial["rw_end"]), "rw end < rw start"
+                assert(trial["rw_end"] <= trial["leave_rw"]), f"leave rw ({trial['leave_rw']}) < rw end ({trial['rw_end']})"
+                assert(trial["outer_time"] <= trial["leave_outer"]), "leave outer < outer time"
 
             except Exception as e:
                 _, _, e_traceback = sys.exc_info()
                 e_line = e_traceback.tb_lineno
 
-                print("bug trial #%d, epoch %d! line %d: %s" % (t, self.key["epoch"], e_line, str(e)))
+                print("bug trial #%d, epoch %d! line %d: %s" % (t + 1, self.key["epoch"], e_line, str(e)))
                 #zero out all measures for bug trials!
                 trial["lockout_starts"] = []
                 trial["lockout_ends"] = []
@@ -371,6 +441,8 @@ class V8TrialParser(TrialParser):
         if self.new:
             trial_df = self.__get_search_repeat(trial_df)
 
+        # print(len(trial_df[trial_df["lockout_type"] != 0]))
+
         return trial_df
     
     def __get_time_offset(self, sc_home_times):
@@ -387,9 +459,12 @@ class V8TrialParser(TrialParser):
                 lim = sc_home_times[4] + offset
                 diffs = np.absolute(self.home_dio_times[self.home_dio_times < lim] - target)
                 mismatch += np.min(diffs) # dio home time that was closest to the target sc home time
+            # NOTE: pippin20210407_.nwb seems to have some sort of issue with dio recording, therefore we do not find 
+            #       a small enough offset. This epoch should be discarded. 
             if mismatch < 0.1: # if below threshold, return the offset for aligning timestamps
                 return offset
             event_idx += 1
+            
 
     
 
@@ -424,7 +499,9 @@ def rw_lockout(rw_type, trial, start, end, events, event_ends, downtimesall):
     trial["rw_end"] = event_ends[valid_indices(event_ends, [start, end])][0]
     trial["leave_rw"] = downtimesall[valid_indices(downtimesall, [trial["rw_start"], trial["lockout_starts"][0]])][-1]
     # those trials when he gets click/beep just as he leaves
-    if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
+    # if (trial["rw_end"] - trial["leave_rw"]) < .3 and (trial["rw_end"] - trial["leave_rw"]) > 0:
+    #     trial["leave_rw"] = trial["rw_end"]
+    if trial["leave_rw"] < trial["rw_end"]:
         trial["leave_rw"] = trial["rw_end"]
     
 def outerwell_lockout(trial, outer, start, downtimesall, downwellsall, goalrec):
@@ -479,7 +556,8 @@ def lookup(reference, target):
             left += 1
     return np.array(indices)
 
-def goodhome_filter(home, lockstarts):
+# bug fix 5/9/25 -- didn't include the home pokes that occurred after all lockstarts, included homepokes that occurred during lockout 
+def goodhome_filter(home, lockstarts, lockends):
     """
     Returns a list of indices i such that home[i] < lockstart-.3 or home[i] > lockstart FOR ALL times in lockstarts
 
@@ -490,8 +568,47 @@ def goodhome_filter(home, lockstarts):
     indices = []
     for i in range(home.size):
         if np.max(lockstarts > home[i]) == 0: # case where no lockstarts occurred after hometime
-            return np.array(indices)
+            indices = np.concatenate((np.array(indices), np.arange(i, home.size))).astype(int)
+            break
         j = np.argmax(lockstarts > home[i]) # first index where lockstart > hometime
         if lockstarts[j]-0.3 > home[i]: # include i if hometime[i] < lockstart-3
             indices.append(i)
+    j = 0
+    k = 0  
+    uncovered = []
+    for j in indices:
+        while k < len(lockstarts) and lockends[k] < home[j]:
+            k += 1
+        if k < len(lockstarts) and lockstarts[k] <= home[j] <= lockends[k]:
+            j += 1  # it's covered, move to next home
+        else:
+            uncovered.append(j)
+            j += 1  
+    indices = uncovered
+
     return np.array(indices)
+
+
+# bug fix, 5/8/2025 -- 
+#   some StateScript files don't save the lockout period, so that is empty in the descriptors
+
+#   Manually calculates the average difference between white noise delivery and registering of lockend
+#   Returns this value to be set in descriptors["lockout_period"]
+def calculate_lockout_period(dataArray):
+    lockend_mask = dataArray[:,1]=="LOCKEND"
+    white_noise_mask = dataArray[:,1] == "WHITENOISE"
+    lockend_times = dataArray[lockend_mask, 0].astype(int)
+    white_noise_times = dataArray[white_noise_mask, 0].astype(int)
+    # if they're not the same length, it should really only be a obob error
+    #   either whitenoise happened before we started recording so there's an extra lockend, or we stopped recording
+    #   after whitenoise started but before registering a lockend
+    if len(lockend_times) != len(white_noise_times):
+        if len(lockend_times) == 0 or len(white_noise_times) == 0:
+            return 0
+        if white_noise_times[-1] > lockend_times[-1]:
+            white_noise_times = white_noise_times[:-1]
+        if lockend_times[0] < white_noise_times[0]:
+            lockend_times = lockend_times[1:]
+    assert (len(lockend_times) == len(white_noise_times)), "Mismatch between lock starts and lock ends "
+    differences = np.array(lockend_times - white_noise_times) / MILLISECONDS_PER_SECOND
+    return float(round(np.mean(differences)))
