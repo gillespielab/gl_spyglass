@@ -147,6 +147,47 @@ def get_beam_times(key, nwbf, beam):
     start_time, end_time = epoch_valid_times.squeeze()
     return diotimesall[(diotimesall >= start_time) & (diotimesall < end_time)]
 
+def get_dio_event_times(key, nwbf, dio_event_name):
+
+    dio_obj_id = (sgc.DIOEvents & {'nwb_file_name': key['nwb_file_name'], 'dio_event_name': dio_event_name}).fetch1('dio_object_id')
+    dios = nwbf.objects[dio_obj_id]
+    dio_times_all = np.asarray(dios.timestamps)
+    dio_data_all = np.asarray(dios.data)
+
+    # get start and end times of the epoch
+    epoch_name = (sgc.TaskEpoch & {"nwb_file_name": key["nwb_file_name"], "epoch": key["epoch"]}).fetch1("interval_list_name")
+    epoch_valid_times = ( # gets time bounds of epoch
+        sgc.IntervalList & {"nwb_file_name" : key["nwb_file_name"], "interval_list_name": epoch_name}
+    ).fetch1("valid_times")
+    epoch_start_time, epoch_end_time = epoch_valid_times.squeeze()
+
+    # constrain the extracted data to times within this epoch
+    epoch_time_mask = (dio_times_all >= epoch_start_time) & (dio_times_all < epoch_end_time)
+    dio_times = dio_times_all[epoch_time_mask]
+    dio_data = dio_data_all[epoch_time_mask]
+
+    # get start and end indices of the dio event being on
+    n_dio_events = len(np.where(dio_data == 1)[0])
+    dio_events_start_idx = np.where(dio_data == 1)[0].astype('int')
+    dio_events_end_idx = []
+    for start in dio_events_start_idx:
+        end = np.where(dio_data[start + 1:] == 0)[0]
+        if end.size > 0:
+            dio_events_end_idx.append(start + 1 + end[0])
+
+    # get start and end times of dio event being on
+    dio_events_start_times = dio_times[dio_events_start_idx]
+    dio_events_end_times = dio_times[dio_events_end_idx]
+
+    # pad end times with end time of the epoch data to account for the case where the homelight was left on after the run session
+    len_diff = len(dio_events_start_times) - len(dio_events_end_times)
+    for i in range(len_diff):
+        dio_events_end_times = np.append(dio_events_end_times, epoch_end_time)
+
+    dio_events_intervals = np.vstack([dio_events_start_times, dio_events_end_times]).T
+
+    return dio_events_start_times, dio_events_end_times, dio_events_intervals
+
 def get_dio_mapping(key, nwbf):
     # get dio mapping for arms
     diomap = {}

@@ -5,6 +5,8 @@ import sys
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 import math
+import ast
+from numpy import array_equal
 
 MILLISECONDS_PER_SECOND = 1000
 
@@ -272,7 +274,36 @@ class V8TrialParser(TrialParser):
         # filter goal records to only count times where goalcount increased
         goalrec = goalcounttimes[np.where(np.diff(goalcount, prepend=0) > 0)[0]]
 
-        return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec
+        # get currentgoal information from 'CURRENTGOAL' printouts
+        currentgoal_mask = dataArray[:, 1] =='CURRENTGOAL'
+        currentgoals = [ast.literal_eval(','.join([g for g in goal if g])) for goal in dataArray[currentgoal_mask, 3:]]
+        currentgoal_times = dataArray[currentgoal_mask, 0].astype(int) / MILLISECONDS_PER_SECOND + offset
+        
+        goals, goal_switch_times, num_goals, forage_num = detect_goal_info(currentgoals, currentgoal_times, descriptors, home)
+
+        if "num_goals" not in descriptors.keys():
+            self.key['descriptors']['num_goals'] = num_goals
+        if "forage_num" not in descriptors.keys():
+            self.key['descriptors']['forage_num'] = forage_num
+
+        # get more detailed outerreps information from 'outerreps' printouts
+        outerreps_mask = dataArray[:, 1] == 'outerreps'
+        outerreps = dataArray[outerreps_mask, 3].astype(int)
+        outerreps_times = dataArray[outerreps_mask, 0].astype(int) / MILLISECONDS_PER_SECOND + offset
+
+        if len(np.unique(outerreps)) == 1:
+            outerreps = outerreps[0]
+            outerreps_times = []
+        else:
+            outerreps_times = [home[home >= outerreps_time][0] for outerreps_time in outerreps_times]  # set the switch to be the next trial start (outerreps get printed out as soon as they finish a goal block, before they initiate the next trial)
+            # might not line up exactly with the goal switch times because there might be multiple pokes at the home well in between when the two get printed out, but should correspond to the same trial! hopefully!
+            # if not array_equal(goal_switch_times, outerreps_times):
+            #     raise RuntimeError(f'goal switch times {goal_switch_times} are not equal to the outerreps times {outerreps_times}')
+
+        if "outer_reps" not in descriptors.keys():
+            self.key['descriptors']['outer_reps'] = outerreps
+
+        return home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec, goals, goal_switch_times, outerreps, outerreps_times
 
     def __get_search_repeat(self, trial_df):
         # classifies trials as search or repeat
@@ -297,7 +328,7 @@ class V8TrialParser(TrialParser):
 
         return trial_df
 
-    def __filter_events(self, home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec):
+    def __filter_events(self, home, rip, wait, outer, uptimes, upwells, downtimesall, downwellsall, lockstarts, lockends, waitends, ripends, goalrec, goals, goal_switch_times, outerreps, outerreps_times):
         """
         Filters parsed behavioral events for epoch based on task rules and stores results in a dataframe
         """
@@ -326,7 +357,7 @@ class V8TrialParser(TrialParser):
                 leave_rw=0.0,
                 rw_success=0,
                 outer_well=0,
-                goal_well=0,
+                goal_well=None,
                 outer_time=0.0,
                 leave_outer=0.0,
                 outer_success=0,
@@ -347,10 +378,10 @@ class V8TrialParser(TrialParser):
                     trial["lockout_starts"] = lockstarts[valid_indices(lockstarts, [start_time, end_time])].tolist()
                     trial["lockout_ends"] = lockends[valid_indices(lockends, [start_time, end_time])].tolist()
                     # Any time there is a lockout, every upwell after is during lockout ?
-                    trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist()
+                    trial["during_lockout"] = upwells[valid_indices(uptimes, [trial["lockout_starts"][0], end_time])].tolist() # TODO: need to update this to be in regular goal notation, not in whatever it is now
                     # completed rip or wait well succesfully 
                     if len(valid_indices(ripends, [start_time, trial["lockout_starts"][0]-.1])) > 0 or len(valid_indices(waitends, [start_time, trial["lockout_starts"][0]-.1])) > 0:
-                        trial["lockout_type"] = 1
+                        trial["lockout_type"] = 2
                         trial["rw_success"] = 1
 
                         if len(valid_indices(rip, [start_time, trial["lockout_starts"][0]-0.1])):
@@ -359,12 +390,13 @@ class V8TrialParser(TrialParser):
                             rw_lockout("wait", trial, start_time, end_time, wait, waitends, downtimesall)
                         
                         # also completed outer successfully (lockedout on way home, ie by going to r/w), still considered locktype1, order error
-                        if len(valid_indices(outer[:, 0], [start_time, trial["lockout_starts"][0]-.1])) > 0:
+                        # bug fix! 7/2/25 was feeding in outer[:, 0] instead of outer[0, :] before!
+                        if len(valid_indices(outer[0, :], [start_time, trial["lockout_starts"][0]-.1])) > 0:
                             trial["outer_time"] = outer[0, valid_indices(outer[0], [start_time, trial["lockout_starts"][0]-.1])[0]]
                             trial["outer_well"] = outer[1, valid_indices(outer[0], [start_time, trial["lockout_starts"][0]-.1])[0]]
                             trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
                             if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
-                                trial["goal_well"] = trial["outer_well"]
+                                # trial["goal_well"] = trial["outer_well"]
                                 trial["outer_success"] = 1
 
                     # did not complete rip/wait successfully
@@ -375,7 +407,7 @@ class V8TrialParser(TrialParser):
                             # Bug fix 5/14/25 --
                             # Changed from 1 to 'home_label' - this was the line that is causing a lot of bug trials that should just be lockouts 
                             trial["leave_home"] = downtimesall[(downwellsall == home_label) & (downtimesall >= start_time) & (downtimesall < trial["lockout_starts"])][-1]
-                            trial["lockout_type"] = 1
+                            trial["lockout_type"] = 2
                             trial["trial_type"] = 0 # type=error, cannot define r or w
                         else:
                             # if a lockout occurred immediately after rip/wait was visited, it was because either
@@ -399,7 +431,7 @@ class V8TrialParser(TrialParser):
                     trial["outer_well"] = outer[1, valid_indices(outer[0], [start_time, end_time])][0]
                     trial["leave_outer"] = downtimesall[valid_indices(downtimesall, [trial["outer_time"], end_time])][-1]
                     if len(valid_indices(goalrec, [start_time, end_time])): # received outer reward
-                        trial["goal_well"] = trial["outer_well"]
+                        # trial["goal_well"] = trial["outer_well"]
                         trial["outer_success"] = 1
                     
                     if len(valid_indices(rip, [start_time, end_time-.001])): # rip trial -.001 to catch trodes freeze trials
@@ -431,7 +463,7 @@ class V8TrialParser(TrialParser):
                 trial["outer_well"] = 0
                 trial["outer_time"] = 0.0
                 trial["leave_outer"] = 0.0
-                trial["goal_well"] = 0
+                trial["goal_well"] = None
                 trial["rw_success"] = 0
 
                 if self.new:
@@ -444,11 +476,13 @@ class V8TrialParser(TrialParser):
             trial_data.append(trial)
         
         trial_df = pd.DataFrame(trial_data)
-        # work backwards to fill in goal info based on rewarded locations (only know once he gets goal for the first time)
-        # this also works when the end of the ep ends in zeros ( will just overwrite 0 with 0), just can"t know goal for those trials
-        for t in range(len(trial_df["goal_well"])-1, 0, -1):
-            if trial_df["goal_well"].iat[t-1] == 0:
-                trial_df["goal_well"].iat[t-1] = trial_df["goal_well"].iat[t]
+        # # work backwards to fill in goal info based on rewarded locations (only know once he gets goal for the first time)
+        # # this also works when the end of the ep ends in zeros ( will just overwrite 0 with 0), just can"t know goal for those trials
+        # for t in range(len(trial_df["goal_well"])-1, 0, -1):
+        #     if trial_df["goal_well"].iat[t-1] == 0:
+        #         trial_df["goal_well"].iat[t-1] = trial_df["goal_well"].iat[t]
+
+        # use the currentgoal printouts from statescriptlog to fill in the goal_well information
 
         if self.new:
             trial_df = self.__get_search_repeat(trial_df)
@@ -549,7 +583,7 @@ def outerwell_lockout(trial, outer, start, downtimesall, downwellsall, goalrec):
     trial["outer_well"] = outer[1, valid_indices(outer[0], [start, trial["lockout_starts"][0]-.1])][0]
     trial["leave_outer"] = downtimesall[(downtimesall >= trial["outer_time"]) & (downtimesall < trial["lockout_starts"][0]) & (downwellsall == trial["outer_well"])][0]
     if len(valid_indices(goalrec, [trial["start_time"],trial["lockout_starts"][0]])) > 0: # received outer reward
-        trial["goal_well"] = trial["outer_well"]
+        # trial["goal_well"] = trial["outer_well"]
         trial["outer_success"] = 1
 
 def rw_mismatch_lockout(rw_type, trial, downtimesall, downwellsall, start):
@@ -566,7 +600,7 @@ def rw_mismatch_lockout(rw_type, trial, downtimesall, downwellsall, start):
     """
     trial_type = 1 if rw_type == "rip" else 2
     trial["trial_type"] = trial_type
-    trial["lockout_type"] = 2
+    trial["lockout_type"] = 1
     trial["leave_home"] = downtimesall[(downwellsall == 1) & (downtimesall >= start) & (downtimesall < trial["lockout_starts"][0])][-1]
 
 def rw_impatience_lockout(rw_type, trial, events, downtimesall, start):
@@ -674,3 +708,130 @@ def calculate_lockout_period(dataArray):
     assert (len(lockend_times) == len(white_noise_times)), "Mismatch between lock starts and lock ends "
     differences = np.array(lockend_times - white_noise_times) / MILLISECONDS_PER_SECOND
     return float(round(np.mean(differences)))
+
+
+def detect_goal_info(currentgoals, currentgoal_times, descriptors, home):
+    # Goal: get current goals and current goal times via StateScriptLog 'CURRENTGOAL' printouts
+    # Side goal: in the process, find descriptors forage_num, num_goal if they don't exist in the descriptors
+
+    forage_num = None
+    num_goals = None
+    # If forage_num was set in the StateScript, retrieve:
+    if "forage_num" in descriptors.keys():
+        forage_num = descriptors['forage_num']
+    # If num_goal was set in the StateScript, retrieve:
+    if "num_goals" in descriptors.keys():
+        num_goals = descriptors['num_goals']
+
+    # initialize detected descriptors
+    detect_forage_num = None
+    detect_num_goals = None
+    forage_trial_start_time = None
+
+    # iterate through values instead of np.diff because sometimes there multiple goals (list of len >1)
+    goals = []
+    goal_switch_times = []
+
+    for g, (goal, goal_time) in enumerate(zip(currentgoals, currentgoal_times)):
+        if g == 0:
+            if len(goal) == 1:
+                goals.append(goal[0])
+            else:
+                goals.append(goal)
+            continue
+
+        prev_goal = currentgoals[g - 1]
+        curr_goal = goal
+
+        prev_goal_time = currentgoal_times[g - 1]
+        curr_goal_time = goal_time
+
+        # Compare the goal to the previous one to check if it was a goal switch
+
+        # if there's only one goal now and there was only one goal before, compare
+        # this is the most common case for the final stage of the task
+        if (len(curr_goal) == 1) & (len(prev_goal) == 1):
+            detect_num_goals = 1
+            detect_forage_num = 1
+            if curr_goal[0] != prev_goal[0]:
+                goals.append(curr_goal[0])
+                trial_start_time = home[home <= curr_goal_time][-1]  # most recent trial start
+                goal_switch_times.append(trial_start_time)
+
+        # if there's only one goal now and there was > 1 before, this was a forageassist trial where they found a goal:
+        #   - set detect_forageassist = len(prev_goal)
+        #   - check that forage_num = detect_forageassist
+        #   - check that curr_goal is within prev_goal
+        #   - assign the goal to be the curr goal (and get rid of the previous goal entry that was based on the forageassist start)
+        #   - if this is not the first goal block (forage_trial_start_time is not None), add that time to the goal switch times
+        if (len(curr_goal) == 1) & (len(prev_goal) > 1):
+            detect_forage_num = len(prev_goal)
+            if forage_num is not None:
+                if forage_num != detect_forage_num:
+                    raise RuntimeError(f'detected forage_num ({detect_forage_num}) and StateScript-extracted forage_num ({forage_num}) are not equal!')
+            
+            if curr_goal[0] not in prev_goal:
+                raise RuntimeError(f'current goal ({curr_goal[0]}) is not in previous goal options ({prev_goal})!')
+
+            if array_equal(np.asarray(goals[-1]), np.asarray(prev_goal)):
+                goals[-1] = curr_goal[0]
+            
+            if (forage_trial_start_time is not None):
+                goal_switch_times.append(forage_trial_start_time)
+                forage_trial_start_time = None
+
+        # if there's > 1 goal now and there was only one goal before:
+        #   - set detect_forageassist = len(curr_goal)
+        #   - check that forage_num = detect_forageassist
+        #   - save the start of this trial in case this is a forageassist trial and it'll switch to one goal later
+        if (len(curr_goal) > 1) & (len(prev_goal) == 1):
+            detect_forage_num = len(curr_goal)
+        
+            if forage_num is not None:
+                if forage_num != detect_forage_num:
+                    raise RuntimeError(f'detected forage_num ({detect_forage_num}) and StateScript-extracted forage_num ({forage_num}) are not equal!')
+
+            goals.append(curr_goal)    
+            forage_trial_start_time = home[home <= curr_goal_time][-1]
+
+        # if there's > 1 goal now and there was > 1 goal before, compare
+        #   - check that num_goals = len(prev_goal) & num_goals = len(curr_goal)
+        #   - if they're different, set detect_num_goal = len(curr_goal)
+        if (len(curr_goal) > 1) & (len(prev_goal) > 1):
+            # if num_goals is not None:
+            #     if (num_goals != len(prev_goal)) | (num_goals != len(curr_goal)):
+            #         raise RuntimeError(f'num_goals was set in state script as {num_goals} while the current goal has {len(curr_goal)} goals and the previous goal has {len(prev_goal)} goals!')
+            if array_equal(np.asarray(curr_goal), np.asarray(prev_goal)):
+                if forage_trial_start_time == None:
+                    # use the first trial to save forage trial start time just in case it's forageassist instead of multiple goals
+                    prev_trial_start_time = home[home <= prev_goal_time][-1]  # most recent trial start
+                    forage_trial_start_time = prev_trial_start_time
+            if not array_equal(np.asarray(curr_goal), np.asarray(prev_goal)):
+                goals.append(curr_goal)
+                trial_start_time = home[home <= curr_goal_time][-1]  # most recent trial start
+                goal_switch_times.append(trial_start_time)
+                detect_num_goals = len(curr_goal)
+
+        if g == len(currentgoals) - 1:
+            # if the last goal has multiple goals and detectforageassist is not None:
+            #   - assign last goal to be 0
+            if (len(curr_goal) > 1) & (detect_forage_num is not None):
+                if len(curr_goal) != detect_forage_num:
+                    raise RuntimeError(f'length of curr goal is {len(curr_goal)} does not match detected forage num {detect_forage_num}!')              
+                goals[-1] = 0
+
+            # if the last goal has multiple goals and forageassist is None:
+            #   - check that num_goals = len(prev_goal)
+            #   - check that forage_num = 0
+            if (len(curr_goal) > 1) & (detect_forage_num is None):
+                if num_goals is not None:
+                    if num_goals != len(curr_goal):
+                        raise RuntimeError(f'statescript-derived num_goals ({num_goals}) does not match length of the current goal ({len(curr_goal)})!')
+
+    if detect_forage_num is not None:
+        detect_num_goals = 1
+
+    if detect_num_goals > 1:
+        detect_forage_num = 0
+    
+    return goals, goal_switch_times, detect_num_goals, detect_forage_num
