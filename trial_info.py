@@ -6,7 +6,7 @@ from spyglass.common.common_dio import DIOEvents
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 from spyglass.utils.dj_mixin import SpyglassMixin
-from gl_spyglass_tables.utils.parse_trials_helper import V8TrialParser
+from gl_spyglass.utils.parse_trials_helper import V8TrialParser
 import numpy as np
 import re
 
