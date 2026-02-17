@@ -1,16 +1,18 @@
-# THIS IS STILL A WORK IN PROGRESS
-
 import sys
 from itertools import starmap
 
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import NonDaemonPool  # For parallel processing
+import spyglass.spikesorting.v1 as sgs
+from spyglass.position import PositionOutput
+import spyglass.position as sgp
 
 from gl_spyglass.utils.coincident_spike_functions import *
 from gl_spyglass.utils.common_neural_functions import validate_references
 from gl_spyglass.utils.parallel_spike_functions.clusterless import *
-from gl_spyglass.utils.parallel_spike_functions.spikesorting import *
+from gl_spyglass.utils.parallel_spike_functions.spikesorting import _process_single_sort_group
 from gl_spyglass.utils.parallel_spike_functions.waveform_feature_extraction import *
+from gl_spyglass.utils.interval_functions import interval_list_during_trials, insert_mobile_times_interval
 
 def parallel_process(sort_group_ids, process_args_list, single_sort_group_fn, use_parallel, max_processes):
 
@@ -44,8 +46,27 @@ def parallel_process(sort_group_ids, process_args_list, single_sort_group_fn, us
                 results = [False] * len(sort_group_ids)
                 effective_processes = 0
 
-# TODO: add input arguments here
-def single_epoch_decoding_pipeline(interval_type):
+def single_epoch_decoding_pipeline(
+        nwb_file_name, 
+        sort_interval_name, 
+        team_name, 
+        interval_type,
+        preproc_param_name='default',
+        artifact_param_name='amp_3000_0.5_prop',
+        sorter_name='clusterless_thresholder',
+        sorting_param_name='default_clusterless',
+        waveform_param_name='default_whitened',
+        metric_param_name='franklab_default',
+        metric_curation_param_name='default',
+        run_metric_curation=True,
+        apply_curation_merges=True,
+        description='Standard pipeline run',
+        skip_duplicates=True,
+        reserve_jobs=True,
+        max_processes=20,
+        kwargs=None,
+        features_param_name='amplitude',
+    ):
     '''
     interval_type: single or combined (useful for sleep decoding)
     '''
@@ -120,6 +141,19 @@ def single_epoch_decoding_pipeline(interval_type):
     parallel_process(sort_group_ids, process_args_list, _process_single_sort_group, use_parallel, max_processes)
 
     # 3) POPULATE UnitWaveformFeatures
+    recording_ids = (sgs.SpikeSortingRecordingSelection() & {
+                    'nwb_file_name': nwb_file_name, 
+                    'interval_list_name': sort_interval_name,
+                    'preproc_param_name': 'default',
+                }).fetch('recording_id')
+    
+    spikesorting_merge_ids = [((SpikeSortingOutput.CurationV1 * sgs.SpikeSortingSelection) & {
+        'nwb_file_name': nwb_file_name,
+        'recording_id': recording_id,
+        'sorter': sorter_name,
+        'sorter_param_name': sorting_param_name,
+    }).fetch1('merge_id') for recording_id in recording_ids]
+
     process_args_list: List[tuple] = []
     for spikesorting_merge_id in spikesorting_merge_ids:
         process_args_list.append(
