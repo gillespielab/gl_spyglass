@@ -138,3 +138,18 @@ def validate_references(nwb_file_name, is_copy=False, verbose=False):
 
     # can return updated electrodes_df list so that this can be pulled from to get the validated reference for the specific electrode_ids you want
     return electrodes_df, val_can_refs
+
+
+def apply_referencing(df, electrodes_df):
+    ref_df = pd.DataFrame()
+    elecs = df.columns
+    for elec in elecs:
+        # find valid reference to apply
+        val_ref = electrodes_df.loc[electrodes_df['electrode_id'] == elec, 'val_ref'].values[0]
+        ref_vals = df[val_ref].values 
+        # apply referencing
+        ref_df[elec] = df[elec].values - ref_vals
+    
+    ref_df.index = df.index
+    
+    return ref_df
