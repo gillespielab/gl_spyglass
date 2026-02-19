@@ -13,6 +13,10 @@ import spyglass.common as sgc
 This is a template script to run any function across all subjects, dates, and epochs.
 Fill out all the TODOs below to customize for your function and the specific subjects/dates/epochs you want to run it on.
 
+To run your customized script in your terminal, navigate to the directory you have it saved in
+and run `python example_all_subjs_script_outline.py` or once you've renamed it: 
+`python {your_script_name}.py`
+
 '''
 
 # To set the dates to be processed for each subject, either: 
