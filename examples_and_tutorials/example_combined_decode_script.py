@@ -12,7 +12,7 @@ import spyglass.common as sgc
 
 import sys
 sys.path.append("../..")
-from gl_spyglass.utils.clusterless_decoding_functions import single_interval_decoding_pipeline
+from gl_spyglass.utils.clusterless_decoding_functions import single_interval_clusterless_pipeline
 
 if __name__ == "__main__":
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
             combined_interval_list_name = '04_r2 and 05_s3'
             interval_list_name = combined_interval_list_name
 
-            single_interval_decoding_pipeline(
+            single_interval_clusterless_pipeline(
                 nwb_file_name,
                 interval_list_name,
                 team_name='Gabby Shvartsman',

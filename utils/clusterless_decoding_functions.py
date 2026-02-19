@@ -46,7 +46,7 @@ def parallel_process(sort_group_ids, process_args_list, single_sort_group_fn, us
                 results = [False] * len(sort_group_ids)
                 effective_processes = 0
 
-def single_interval_decoding_pipeline(
+def single_interval_clusterless_pipeline(
         nwb_file_name, 
         sort_interval_name, 
         team_name, 
@@ -66,6 +66,7 @@ def single_interval_decoding_pipeline(
         max_processes=20,
         kwargs=None,
         features_param_name='amplitude',
+        decode=True,
     ):
     '''
     interval_type: single or combined (useful for sleep decoding)
@@ -276,7 +277,7 @@ def single_interval_decoding_pipeline(
             print(f'{filt_mobile_interval_list_name} & {filt_pos_interval_list_name} already in sgc.IntervalList() for this session')
         else:
             print('loading in spike times...')
-            spike_times, spike_waveform_features = (
+            spike_times, _ = (
                 UnitWaveformFeatures & waveform_s_keys
             ).fetch_data()
 
@@ -303,13 +304,19 @@ def single_interval_decoding_pipeline(
         # during trials
         epoch = int(interval_list_name[:2])
 
-        during_trials_filt_mobile_interval = interval_list_during_trials(nwb_file_name, filt_mobile_interval_list_name, epoch)
-        during_trials_filt_pos_interval = interval_list_during_trials(nwb_file_name, filt_pos_interval_list_name, epoch)
+        if (sgc.TaskEpoch() & {'nwb_file_name': nwb_file_name, 'epoch': epoch}).fetch1('task_name') == 'Sleep':
+            # there aren't any trials so we can just use the filtered intervals as is for sleep sessions
+            during_trials_filt_mobile_interval = filt_mobile_interval_list_name
+            during_trials_filt_pos_interval = filt_pos_interval_list_name
+        else:
+            during_trials_filt_mobile_interval = interval_list_during_trials(nwb_file_name, filt_mobile_interval_list_name, epoch)
+            during_trials_filt_pos_interval = interval_list_during_trials(nwb_file_name, filt_pos_interval_list_name, epoch)
 
         if (nwb_file_name == 'teddy20250620_.nwb') | (nwb_file_name == 'teddy20250626_.nwb'):
             wf_group_name = f'ca1_waveforms without outliers {sort_interval_name}'
         else:
             wf_group_name = f'ca1_waveforms {sort_interval_name}'
+        
         pos_group_name = f'{interval_list_name} decoding'
         decoding_param_name = 'contfrag_clusterless_placebin3_100chunks_blocksize100__nocache'
         encoding_interval = during_trials_filt_mobile_interval
@@ -398,43 +405,28 @@ def single_interval_decoding_pipeline(
         filt_sleep_pos_complete = len(sgc.IntervalList() & {'nwb_file_name': nwb_file_name, 'interval_list_name': filt_sleep_pos_interval_list_name}) != 0
 
         # check that filtered and during trials run intervals exist and insert them if they don't
-        if not filt_sleep_pos_complete:
-            print('loading in spike times...')
-            
-            recording_ids = (sgs.SpikeSortingRecordingSelection() & {
-                'nwb_file_name': nwb_file_name, 
-                'interval_list_name': sleep_pos_interval_list_name,
-                'preproc_param_name': 'default',
-            }).fetch('recording_id')
-    
-            spikesorting_merge_ids = [((SpikeSortingOutput.CurationV1 * sgs.SpikeSortingSelection) & {
-                'nwb_file_name': nwb_file_name,
-                'recording_id': recording_id,
-                'sorter': sorter_name,
-                'sorter_param_name': sorting_param_name,
-            }).fetch1('merge_id') for recording_id in recording_ids]
+        if (not filt_run_pos_complete) | (not filt_run_mobile_complete):
+            print('making sure all the run intervals have been separately processed...')
 
-            waveform_s_keys = [
-                {
-                    'spikesorting_merge_id': spikesorting_merge_id,
-                    'features_param_name': features_param_name,
-                }
-                for spikesorting_merge_id in spikesorting_merge_ids
-            ]
-            
-            spike_times, _ = (
-                UnitWaveformFeatures & waveform_s_keys
-            ).fetch_data()
-
-            _, _, med_coinc_spike_times = detect_coincident_spikes(spike_times, spike_closeness_threshold, max_coincident_fraction)
-
-            filt_sleep_pos_interval_list_name = insert_coincident_spike_interval_list(
-                med_coinc_spike_times, 
-                removal_window_s, 
+            # make sure this session has processed spikes and unit waveform features and coincident spike intervals inserted
+            single_interval_clusterless_pipeline(
                 nwb_file_name,
-                sleep_pos_interval_list_name,
-                spike_closeness_threshold,
-                max_coincident_fraction,
+                run_interval_list_name,
+                team_name='Gabby Shvartsman',
+                interval_type='single',
+                decode=False,
+            )
+        
+        if (not filt_sleep_pos_complete) | (not filt_sleep_mobile_complete):
+            print('making sure all the sleep intervals have been separately processed...')
+
+            # make sure this session has processed spikes and unit waveform features and coincident spike intervals inserted
+            single_interval_clusterless_pipeline(
+                nwb_file_name,
+                sleep_interval_list_name,
+                team_name='Gabby Shvartsman',
+                interval_type='single',
+                decode=False,
             )
 
         # during trials
@@ -464,21 +456,22 @@ def single_interval_decoding_pipeline(
         estimate_decoding_params = False 
     
     # 8) POPULATE ClusterlessDecodingSelection
-    # insert a ClusterlessDecodingSelection entry into the database
-    selection_key = {
-        "waveform_features_group_name": wf_group_name,
-        "position_group_name": pos_group_name,
-        "decoding_param_name": decoding_param_name,
-        "nwb_file_name": nwb_file_name,
-        "encoding_interval": encoding_interval,
-        "decoding_interval": decoding_interval,
-        "estimate_decoding_params": estimate_decoding_params,
-    }
+    if decode:
+        # insert a ClusterlessDecodingSelection entry into the database
+        selection_key = {
+            "waveform_features_group_name": wf_group_name,
+            "position_group_name": pos_group_name,
+            "decoding_param_name": decoding_param_name,
+            "nwb_file_name": nwb_file_name,
+            "encoding_interval": encoding_interval,
+            "decoding_interval": decoding_interval,
+            "estimate_decoding_params": estimate_decoding_params,
+        }
 
-    ClusterlessDecodingSelection.insert1(
-        selection_key,
-        skip_duplicates=True,
-    )
+        ClusterlessDecodingSelection.insert1(
+            selection_key,
+            skip_duplicates=True,
+        )
 
-    # run with gpu
-    ClusterlessDecodingV1.populate(selection_key)
+        # run with gpu
+        ClusterlessDecodingV1.populate(selection_key)
