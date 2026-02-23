@@ -3,8 +3,6 @@ import datajoint as dj
 dj.config['database.host'] = "gl-ash.biostr.washington.edu"
 dj.config['database.user'] = "gabby"
 dj.config['database.port'] = 3306
-# dj.config['database.reconnect'] = True
-dj.config['connection_init_function'] = lambda conn: conn.ping(reconnect=True)
 
 dj.conn()
 

@@ -60,6 +60,7 @@ def single_interval_clusterless_pipeline(
         metric_curation_param_name='default',
         run_metric_curation=True,
         apply_curation_merges=True,
+        decoding_param_name='contfrag_clusterless_placebin3_100chunks_blocksize100__nocache',
         description='Standard pipeline run',
         skip_duplicates=True,
         reserve_jobs=True,
@@ -318,7 +319,7 @@ def single_interval_clusterless_pipeline(
             wf_group_name = f'ca1_waveforms {sort_interval_name}'
         
         pos_group_name = f'{interval_list_name} decoding'
-        decoding_param_name = 'contfrag_clusterless_placebin3_100chunks_blocksize100__nocache'
+        decoding_param_name = decoding_param_name
         encoding_interval = during_trials_filt_mobile_interval
         decoding_interval = during_trials_filt_pos_interval 
         estimate_decoding_params = True
@@ -449,7 +450,7 @@ def single_interval_clusterless_pipeline(
         print(f'inserted {combined_encoding_interval_name}')
 
         pos_group_name = f'04_r2 encoding 05_s3 decoding'
-        decoding_param_name = 'contfrag_clusterless_placebin3_100chunks_blocksize100__nocache'
+        decoding_param_name = decoding_param_name
         wf_group_name = f'ca1_waveforms {sort_interval_name}'
         encoding_interval = combined_encoding_interval_name
         decoding_interval = filt_sleep_pos_interval_list_name
