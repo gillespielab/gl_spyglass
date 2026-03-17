@@ -15,7 +15,7 @@ from gl_spyglass.utils.clusterless_decoding_functions import single_interval_clu
 if __name__ == "__main__":
 
     subj_date_dict = {
-        'pippin': [20210419],
+        'pippin': [20210421],
     }
 
     subjs = subj_date_dict.keys()
@@ -35,4 +35,10 @@ if __name__ == "__main__":
                 interval_list_name,
                 team_name='Gabby Shvartsman',
                 interval_type='single',
+                # decoding_param_name='contfrag_clusterless_placebin3_100chunks_blocksize100__nocache',
+                # decoding_param_name='contfrag_clusterless_placebin3_10chunks_blocksize100__nocache',
+                decoding_param_name='contfrag_clusterless_placebin2_100chunks_blocksize100_nocache',
+                # decoding_param_name='contfrag_clusterless',
+                # decoding_param_name='contfrag_clusterless_placebin3_10chunks_blocksize100__nocache',
+                # decoding_param_name='contfrag_clusterless_placebin3_100chunks_blocksize1000_nocache',
             )
