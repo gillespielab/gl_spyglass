@@ -219,6 +219,7 @@ def check_epoch_exclusion(nwb_file_name, epoch):
                        'tony20250408_.nwb': [4],
                        'tony20250415_.nwb': [2],
                        'tony20250506_.nwb': [2],
+                       'hugo20210829_.nwb': [4],
                        }  
     if nwb_file_name in excluded_epochs.keys():
         if epoch in excluded_epochs[nwb_file_name]:
@@ -249,3 +250,7 @@ def check_unknown_outerreps(nwb_file_name, epoch):
     else:
         print(f'unknown outer reps type for {nwb_file_name} epoch {epoch}')
     return outer_reps
+
+def get_valid_trials_mask(df):
+    valid_trials_mask = (df['lockout_type'] == 0) & (df['bug_trial'] == 0) & (df['goal_well'] != '0')
+    return valid_trials_mask
