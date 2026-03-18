@@ -17,9 +17,17 @@ import re
 
 from trodes_to_nwb.convert import create_nwbs
 
-OUTPUT_PATH = "/home/gl-willow/banyan/nwb/raw/"
-LOGS_PATH = "/home/gl-willow/banyan/nwb/nwbinspector_reports/"
-VIDEO_PATH = "/home/gl-willow/banyan/nwb/video/"
+# set global data paths
+curr_dir = os.getcwd()
+
+if curr_dir.startswith('/home/gl-willow'):
+    path_to_banyan = '/home/gl-willow/'
+if curr_dir.startswith('/home/cypress'):
+    path_to_banyan = '/mnt/'
+
+OUTPUT_PATH = os.path.join(path_to_banyan, "banyan/nwb/raw/")
+LOGS_PATH = os.path.join(path_to_banyan, "banyan/nwb/nwbinspector_reports/")
+VIDEO_PATH = os.path.join(path_to_banyan, "banyan/nwb/video/")
 
 # moves all nwbinspector reports out of the raw directory
 def move_inspector_reports(
@@ -107,11 +115,11 @@ def main():
 
     subj = args.name
     if subj == 'teddy' or subj == 'timothy':
-        data_path = "/home/gl-willow/banyan/raw/gabby/"
-    elif subj == 'muenster' or subj == 'feta' or subj == 'ricotta' or subj == 'ricottatest' or subj == 'cheddar':
-        data_path = "/home/gl-willow/banyan/raw/josiah/EC1/"
+        data_path = os.path.join(path_to_banyan, "banyan/raw/gabby/")
+    elif subj == 'muenster' or subj == 'feta' or subj == 'ricotta' or subj == 'cheddar':
+        data_path = os.path.join(path_to_banyan, "banyan/raw/josiah/EC1/")
     else:
-        data_path = "/home/gl-willow/banyan/raw/anna/"
+        data_path = os.path.join(path_to_banyan, "banyan/raw/anna/")
 
     make_nwbs(data_path, args.name, dates=args.dates, excluded_dates=args.excluded, dry_run=False)
 
