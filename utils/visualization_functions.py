@@ -7,6 +7,7 @@ from matplotlib.ticker import MultipleLocator, MaxNLocator
 import statsmodels.formula.api as smf
 import os
 import seaborn as sns
+from matplotlib.lines import Line2D
 
 
 plt.style.context('seaborn-talk')
@@ -233,7 +234,8 @@ def plot_all_subjs_young_aged(data, y_col, y_label, title, save_dir, fig_name, p
 
     try:
         # calculate LME stats
-        md = smf.mixedlm(f"{y_col} ~ age", data, groups="subj")
+        processed_data = data[['age', 'subj', y_col]].dropna()
+        md = smf.mixedlm(f"{y_col} ~ age", processed_data, groups="subj")
         mdf = md.fit()
         ax.text(0.5, -0.4, f'age effect pval: {mdf.pvalues["age[T.young]"]}', ha='center', va='bottom', fontsize=8, transform=ax.transAxes)
     except Exception as e:
@@ -252,3 +254,65 @@ def plot_all_subjs_young_aged(data, y_col, y_label, title, save_dir, fig_name, p
     # plt.show()
 
     return g
+
+
+def add_figure_scalebar(
+    fig, ref_ax,
+    x_len, y_len,
+    x_label=None, y_label=None,
+    origin=(0.05, -0.06),   # outside bottom-left
+    lw=2,
+    color='black',
+    label_pad=0.4          # fraction of bar thickness
+):
+    """
+    Draw figure-level scale bars using ref_ax as the data ruler.
+    """
+
+    # ---- data → pixel conversion ----
+    p0 = ref_ax.transData.transform((0, 0))
+    px = ref_ax.transData.transform((x_len, 0))
+    py = ref_ax.transData.transform((0, y_len))
+
+    dx_pix = px[0] - p0[0]
+    dy_pix = py[1] - p0[1]
+
+    fig_w, fig_h = fig.get_size_inches() * fig.dpi
+    dx = dx_pix / fig_w
+    dy = dy_pix / fig_h
+
+    x0, y0 = origin
+
+    # ---- scale bars ----
+    fig.add_artist(Line2D(
+        [x0, x0 + dx], [y0, y0],
+        transform=fig.transFigure,
+        lw=lw, color=color
+    ))
+
+    fig.add_artist(Line2D(
+        [x0, x0], [y0, y0 + dy],
+        transform=fig.transFigure,
+        lw=lw, color=color
+    ))
+
+    # ---- automatic label spacing ----
+    pad_x = label_pad * dy
+    pad_y = label_pad * dx
+
+    if x_label is None:
+        x_label = f'{x_len}'
+    if y_label is None:
+        y_label = f'{y_len}'
+
+    fig.text(
+        x0 + dx / 2, y0 - pad_x,
+        x_label,
+        ha='center', va='top'
+    )
+
+    fig.text(
+        x0 - pad_y, y0 + dy / 2,
+        y_label,
+        ha='right', va='center'
+    )
