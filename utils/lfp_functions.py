@@ -6,15 +6,16 @@ import spyglass.lfp as lfp
 import spyglass.position as sgp
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.lfp.analysis.v1 import LFPBandSelection, LFPBandV1
+from spyglass.lfp.v1 import LFPArtifactRemovedIntervalList
 from spyglass.utils import logger
 
 from gl_spyglass.utils.common_neural_functions import validate_references
+from gl_spyglass.custom_spyglass_tables.sleep_structure import ThetaDeltaRatioSelection, ThetaDeltaRatio
 
-
-def single_epoch_lfp_pipeline(nwb_file_name, interval_list_name, pos_interval_list_name, pop_ripple=True, rip_artifact_removed=True, pop_theta=False, ripple_param_name='default_karlsson'):
+def single_epoch_lfp_pipeline(nwb_file_name, interval_list_name, pos_interval_list_name, pop_ripple_band=False, rip_artifact_removed=True, ripple_param_name='default_karlsson'):
     '''
     This function walks through populating LFP, with an option to populate the ripple LFP band and detect ripples.
-    Functionality for populating the theta band is not yet built out -- this function could be improved to populate an arbitrary lfp band.
+    This function could be improved to populate an arbitrary lfp band.
 
     Currently the ripple detection step is commented out as the grouped_date_ripple_pipeline function below is used for the actual
     ripple detection step instead (since you need to utilize the grouped ripple tables in order to use the Shvartsman_ripple_detection method).
@@ -124,9 +125,9 @@ def single_epoch_lfp_pipeline(nwb_file_name, interval_list_name, pos_interval_li
     pos_merge_key = (sgp.PositionOutput.merge_get_part(pos_key)).fetch1("KEY")
     pos_merge_id = pos_merge_key['merge_id']
 
-    if pop_ripple:
+    if pop_ripple_band:
         # 4) RIPPLE DETECTION
-        print('populating ripples...')
+        print('populating ripple band...')
         # populate ripple LFP band using artifact removed interval list
         # select lfp band parameters
         lfp_sampling_rate = LFPOutput.merge_get_parent(
@@ -223,7 +224,7 @@ def single_epoch_lfp_pipeline(nwb_file_name, interval_list_name, pos_interval_li
         # print('completed ripple detection pipeline')
 
 
-def grouped_date_ripple_pipeline(nwb_file_name, ripple_param_name):
+def grouped_date_ripple_pipeline(nwb_file_name, ripple_param_name, expected_epochs):
         # CUSTOM GROUPED RIPPLE TIMES PIPELINE
 
         from gl_spyglass.custom_spyglass_tables.grouped_ripple import LFPBandGroup, RippleLFPSelection, RippleParameters, RippleTimesGroup
@@ -232,7 +233,7 @@ def grouped_date_ripple_pipeline(nwb_file_name, ripple_param_name):
 
         # insert lfp band group based on date --> will calculate and store the baselines and deviations based on all mobile times across epochs
         if len(LFPBandGroup() & {'band_group_name': nwb_file_name, 'band_group_filter_name': lfp_band_filter_name}) == 0:
-            LFPBandGroup().insert_from_date(nwb_file_name, lfp_band_filter_name)
+            LFPBandGroup().insert_from_date(nwb_file_name, lfp_band_filter_name, expected_epochs)
 
         # create group key
         lfp_band_group_key = {'band_group_name': nwb_file_name, 'band_group_filter_name': lfp_band_filter_name}
@@ -265,3 +266,119 @@ def grouped_date_ripple_pipeline(nwb_file_name, ripple_param_name):
 
         # detect ripples across the lfp band group
         RippleTimesGroup().populate(rip_key)
+
+def populate_theta_delta_ratio(nwb_file_name, interval_list_name, referenced=False):
+
+    lfp_electrode_group_name = 'good_single_elecs'
+    lfp_filter_name = 'LFP 0-400 Hz'
+    lfp_s_key = {
+        'nwb_file_name': nwb_file_name,
+        'lfp_electrode_group_name': lfp_electrode_group_name,
+        'target_interval_list_name': interval_list_name,
+        'filter_name': lfp_filter_name,
+        'filter_sampling_rate': 30_000,  # sampling rate of the data (Hz)
+        'target_sampling_rate': 1_000,  # sampling rate of the lfp output (Hz)
+    }
+    lfp_merge_id = (LFPOutput.LFPV1() & lfp_s_key).fetch1('merge_id')
+
+    lfp_sampling_rate = LFPOutput.merge_get_parent(
+        {"merge_id": lfp_merge_id}
+    ).fetch1("lfp_sampling_rate")
+
+    # select artifact detection parameters
+    artifact_params_name = 'mad_7_0.66_thresh_200ms'
+    lfp_filter_name = 'LFP 0-400 Hz'
+    lfp_artifact_s_key = {
+        'nwb_file_name': nwb_file_name,
+        'lfp_electrode_group_name': lfp_electrode_group_name,
+        'target_interval_list_name': interval_list_name,
+        'filter_name': lfp_filter_name,
+        'filter_sampling_rate': 30_000,  # I'm pretty sure this is the sampling rate for the original data but not sure
+        'artifact_params_name': artifact_params_name,
+    }
+    artifact_removed_interval_list_name = (LFPArtifactRemovedIntervalList() & lfp_artifact_s_key).fetch1('artifact_removed_interval_list_name')
+
+    lfp_band_interval_list_name = artifact_removed_interval_list_name
+
+    if referenced:
+        lfp_band_filter_names = ['Delta 0.5-4 Hz', 'Theta 5-11 Hz']
+    else:
+        lfp_band_filter_names = ['Delta 0.5-4 Hz (unreferenced)', 'Theta 5-11 Hz (unreferenced)']
+
+    for lfp_band_filter_name in lfp_band_filter_names:
+        lfp_band_s_key = {
+            'lfp_merge_id': lfp_merge_id,
+            'filter_name': lfp_band_filter_name,
+            'filter_sampling_rate': lfp_sampling_rate,
+            'target_interval_list_name': lfp_band_interval_list_name,
+            'lfp_band_sampling_rate': lfp_sampling_rate,
+            'nwb_file_name': LFPOutput.merge_get_parent({"merge_id": lfp_merge_id}).fetch1("nwb_file_name"),
+        }
+
+        # Set lfp band electrodes
+        if len(LFPBandSelection() & lfp_band_s_key) == 0:
+
+            
+            # select electrode ids to run the lfp band processing on: all ca1 electrodes are included in ripple_electrode_list, can1ref and can2ref are included in ripple_ref_electrode_list
+            electrodes_df, val_can_refs = validate_references(nwb_file_name, is_copy=True)
+            electrodes_df = electrodes_df[electrodes_df['bad_channel'] == 'False']
+            electrodes_df = pd.DataFrame(
+                [
+                    electrodes_df[electrodes_df['electrode_group_name'] == i].iloc[0]
+                    for i in np.unique(electrodes_df['electrode_group_name'].values)
+                ]
+            )
+            ca1_elecs_mask = (electrodes_df['region_name'] == 'ca1')
+            ca1_electrode_list = electrodes_df.loc[ca1_elecs_mask, 'electrode_id'].values
+
+            if referenced:
+                ca1_ref_electrode_list = electrodes_df.loc[ca1_elecs_mask, 'val_ref'].values.astype('int')
+            else:
+                ca1_ref_electrode_list = -1
+
+            # cross check with the electrodes used in the lfp_electrode_group_name used to process the lfp ('good_single_elecs')
+            lfp_elecs = (lfp.lfp_electrode.LFPElectrodeGroup.LFPElectrode() & 
+            {'nwb_file_name': nwb_file_name, 'lfp_electrode_group_name': 'good_single_elecs'}).fetch('electrode_id')
+            if not np.all([elec in lfp_elecs for elec in ca1_electrode_list]):
+                raise ValueError('not all of the electrodes selected for ripple detection have been processed in the lfp filtering step')
+
+            LFPBandSelection().set_lfp_band_electrodes(
+                nwb_file_name=lfp_band_s_key['nwb_file_name'],
+                lfp_merge_id=lfp_merge_id,
+                electrode_list=ca1_electrode_list,
+                filter_name=lfp_band_filter_name,
+                interval_list_name=lfp_band_interval_list_name,
+                reference_electrode_list=ca1_ref_electrode_list,
+                lfp_band_sampling_rate=lfp_sampling_rate,    
+            )
+
+        # Populate LFPBandV1
+        if not (LFPBandV1 & lfp_band_s_key):
+            logger.info(f"Populating LFPBandV1 for {lfp_band_filter_name}...")
+            LFPBandV1().populate(
+                lfp_band_s_key,
+            )
+        else:
+            logger.info(f"LFPBandV1 already populated for {lfp_band_filter_name}.")
+        
+    # Populate theta/delta ratio
+    smoothing_sigma = 0.004
+    theta_delta_key = {
+        'theta_delta_nwb_file_name': nwb_file_name,
+        'theta_delta_lfp_merge_id': lfp_merge_id,
+        'interval_list_name': lfp_band_interval_list_name,
+        'smoothing_sigma': smoothing_sigma,
+        'referenced': int(referenced),
+    }
+    if len(ThetaDeltaRatioSelection & theta_delta_key) == 0:
+        ThetaDeltaRatioSelection().add_theta_delta(
+            nwb_file_name=nwb_file_name,
+            lfp_merge_id=lfp_merge_id,
+            lfp_sampling_rate=lfp_sampling_rate,
+            interval_list_name=lfp_band_interval_list_name,
+            lfp_band_sampling_rate=lfp_sampling_rate,
+            smoothing_sigma=smoothing_sigma,
+            referenced=referenced,
+        )
+
+    ThetaDeltaRatio().populate(theta_delta_key)

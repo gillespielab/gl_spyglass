@@ -21,7 +21,7 @@ from spyglass.position import PositionOutput
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
-from gabby_analysis_gillespie.utils.interval_functions import *
+from gl_spyglass.utils.interval_functions import *
 
 # NOTE: these grouped ripple tables are relevant if you want to find a ripple threshold based on the standard deviations across multiple epochs within a day (rather than within each epoch)
 # that's particularly relevant for sleep epochs where you don't want the standard deviation to be too high, otherwise you'll miss a lot of ripples that you would've normally counted in a run epoch
@@ -54,10 +54,17 @@ class LFPBandGroup(SpyglassMixin, dj.Manual):
         -> LFPBandV1
         """
 
-    def insert_from_date(self, nwb_file_name, lfp_band_filter_name):
+    def insert_from_date(self, nwb_file_name, lfp_band_filter_name, expected_epochs):
         lfpband_s_key = (sgc.Session() & {'nwb_file_name': nwb_file_name}).fetch('KEY')[0]
         lfpband_s_key['filter_name'] = lfp_band_filter_name
         lfpband_keys = (LFPBandV1() & lfpband_s_key).fetch('KEY')
+
+        artifact_interval_list_names = (LFPBandV1() & lfpband_keys).fetch('target_interval_list_name')
+        avail_interval_list_names = [(lfp.v1.LFPArtifactDetection() & {'artifact_removed_interval_list_name': interval_list_name}).fetch1('target_interval_list_name') for interval_list_name in artifact_interval_list_names]
+        avail_epochs = np.asarray([(sgc.TaskEpoch() & {'nwb_file_name': nwb_file_name, 'interval_list_name': interval_list_name}).fetch1('epoch') for interval_list_name in avail_interval_list_names])
+        
+        if not np.array_equal(np.sort(expected_epochs), np.sort(avail_epochs)):
+            raise RuntimeError(f'Only found epochs {np.sort(avail_epochs)} in LFPBandV1 entries for this date, but expected {expected_epochs}. Please ensure you have populated all LFPBandV1 epochs for this date before running the grouped functions.')
 
         baselines = None
         deviations = None
@@ -693,7 +700,7 @@ def compute_mobile_median_mad_across_day(nwb_file_name):
         pos_interval_list_name = (sgc.IntervalList() & {'nwb_file_name': nwb_file_name, 'pipeline': 'position'}).fetch('interval_list_name')[epoch - 1]
 
         trodes_pos_params_name = 'default'
-        mobile_interval_list_name = insert_mobile_times_interval(nwb_file_name, pos_interval_list_name, trodes_pos_params_name, speed_thresh=4, time_thresh=1)
+        mobile_interval_list_name = insert_mobile_times_interval(nwb_file_name, pos_interval_list_name, trodes_pos_params_name, speed_thresh=4, time_thresh=1, plot_pos=False)
 
         # 2. load in ripple band df
         lfp_electrode_group_name = 'good_single_elecs'
@@ -761,6 +768,9 @@ def compute_mobile_median_mad_across_day(nwb_file_name):
         ripple_band_df = (LFPBandV1() & lfp_band_key).fetch1_dataframe()
 
         # filter into mobile times only
+        if len((sgc.IntervalList() & {'nwb_file_name': nwb_file_name, 'interval_list_name': mobile_interval_list_name}).fetch1('valid_times')) == 0:
+            print(f'{mobile_interval_list_name} is empty, skipping to next epoch')
+            continue
         mobile_interval = (sgc.IntervalList() & {'nwb_file_name': nwb_file_name, 'interval_list_name': mobile_interval_list_name}).fetch_interval()
         mobile_inds = mobile_interval.contains(ripple_band_df.index.values, as_indices=True)
         mobile_ripple_band_df = ripple_band_df.iloc[mobile_inds]
