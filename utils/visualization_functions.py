@@ -269,6 +269,10 @@ def add_figure_scalebar(
     Draw figure-level scale bars using ref_ax as the data ruler.
     """
 
+    # NOTE: when saving out a figure after using this function, make sure to set: plt.savefig("your_figure_name.svg", bbox_inches='tight') to make sure it's all included in the file and doesn't get cut off
+
+    fig.canvas.draw()
+
     # ---- data → pixel conversion ----
     p0 = ref_ax.transData.transform((0, 0))
     px = ref_ax.transData.transform((x_len, 0))

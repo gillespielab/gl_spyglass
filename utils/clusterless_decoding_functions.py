@@ -13,6 +13,7 @@ from gl_spyglass.utils.parallel_spike_functions.clusterless import *
 from gl_spyglass.utils.parallel_spike_functions.spikesorting import _process_single_sort_group
 from gl_spyglass.utils.parallel_spike_functions.waveform_feature_extraction import *
 from gl_spyglass.utils.interval_functions import interval_list_during_trials, insert_mobile_times_interval
+from gl_spyglass.utils.trial_info_8arm_helper_functions import check_epoch_exclusion
 
 def parallel_process(sort_group_ids, process_args_list, single_sort_group_fn, use_parallel, max_processes):
 
@@ -310,6 +311,10 @@ def single_interval_clusterless_pipeline(
             during_trials_filt_mobile_interval = filt_mobile_interval_list_name
             during_trials_filt_pos_interval = filt_pos_interval_list_name
         else:
+            if check_epoch_exclusion(nwb_file_name, epoch):
+                print('this epoch has messed up trial information so not going to bother decoding it')
+                return
+
             during_trials_filt_mobile_interval = interval_list_during_trials(nwb_file_name, filt_mobile_interval_list_name, epoch)
             during_trials_filt_pos_interval = interval_list_during_trials(nwb_file_name, filt_pos_interval_list_name, epoch)
 
