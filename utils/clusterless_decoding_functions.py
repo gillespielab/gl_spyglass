@@ -1,5 +1,6 @@
 import sys
 from itertools import starmap
+import numba
 
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import NonDaemonPool  # For parallel processing
@@ -481,3 +482,59 @@ def single_interval_clusterless_pipeline(
 
         # run with gpu
         ClusterlessDecodingV1.populate(selection_key)
+
+
+
+@numba.njit(parallel=True)
+def _hpd_weighted_mean(P_flat, coords, target_prob=0.9):
+    T, N = P_flat.shape
+    mean_coords = np.zeros((T, 2), dtype=np.float64)
+    
+    for t in numba.prange(T):
+        p = P_flat[t]
+        
+        # Partial selection: get top ~50% bins to cover 90% probability
+        k = N // 2
+        idx_partition = np.argpartition(-p, k)
+        top_probs = p[idx_partition[:k]]
+        top_idx_sorted = idx_partition[:k][np.argsort(-top_probs)]
+        
+        # Select bins until cumulative probability >= target_prob
+        cum_prob = 0.0
+        hp_mask = np.zeros(N, dtype=np.bool_)
+        for idx in top_idx_sorted:
+            cum_prob += p[idx]
+            hp_mask[idx] = True
+            if cum_prob >= target_prob:
+                break
+        
+        # Weighted mean over selected bins
+        hp_coords = coords[hp_mask]
+        hp_prob = p[hp_mask]
+        total_prob = np.sum(hp_prob)
+        mean_coords[t, 0] = np.sum(hp_coords[:, 0] * hp_prob) / total_prob
+        mean_coords[t, 1] = np.sum(hp_coords[:, 1] * hp_prob) / total_prob
+    
+    return mean_coords
+
+
+def get_hpd_weighted_mean(posterior, target_prob=0.9):
+
+    P = posterior.values
+    x_centers = posterior['x_position'].values
+    y_centers = posterior['y_position'].values
+
+    T, X, Y = P.shape
+    N = X * Y
+
+    # Flatten probabilities
+    P_flat = P.reshape(T, -1)  # (T, X*Y)
+
+    # Coordinates
+    xx, yy = np.meshgrid(x_centers, y_centers, indexing="ij")
+    coords = np.stack([xx.ravel(), yy.ravel()], axis=1)  # (N, 2)
+
+    # Compute weighted means for all time bins
+    weighted_mean_coords = _hpd_weighted_mean(P_flat, coords, target_prob=0.9)
+
+    return weighted_mean_coords
