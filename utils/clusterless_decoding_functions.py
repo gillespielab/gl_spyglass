@@ -319,10 +319,11 @@ def single_interval_clusterless_pipeline(
             during_trials_filt_mobile_interval = interval_list_during_trials(nwb_file_name, filt_mobile_interval_list_name, epoch)
             during_trials_filt_pos_interval = interval_list_during_trials(nwb_file_name, filt_pos_interval_list_name, epoch)
 
-        if (nwb_file_name == 'teddy20250620_.nwb') | (nwb_file_name == 'teddy20250626_.nwb'):
-            wf_group_name = f'ca1_waveforms without outliers {sort_interval_name}'
-        else:
-            wf_group_name = f'ca1_waveforms {sort_interval_name}'
+        # if (nwb_file_name == 'teddy20250620_.nwb') | (nwb_file_name == 'teddy20250626_.nwb'):
+        #     wf_group_name = f'ca1_waveforms without outliers {sort_interval_name}'
+        # else:
+        #     wf_group_name = f'ca1_waveforms {sort_interval_name}'
+        wf_group_name = f'ca1_waveforms {sort_interval_name}'
         
         pos_group_name = f'{interval_list_name} decoding'
         decoding_param_name = decoding_param_name
@@ -475,6 +476,7 @@ def single_interval_clusterless_pipeline(
             "estimate_decoding_params": estimate_decoding_params,
         }
 
+        # print(selection_key)
         ClusterlessDecodingSelection.insert1(
             selection_key,
             skip_duplicates=True,
