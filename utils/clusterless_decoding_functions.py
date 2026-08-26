@@ -97,8 +97,8 @@ def single_interval_clusterless_pipeline(
 
     # 1) SET SORT GROUPS
     # get validated references
-    electrodes_df, val_can_refs = validate_references(nwb_file_name, is_copy=True)
-    val_ref_dict = dict(electrodes_df[['electrode_group_name', 'val_ref']].groupby('electrode_group_name').mean().reset_index().astype(int).astype({'electrode_group_name': str}).values)
+    electrodes_df, _ = validate_references(nwb_file_name, is_copy=True)
+    val_ref_dict = dict(electrodes_df[['electrode_group_name', 'val_ref']].dropna().groupby('electrode_group_name').mean().reset_index().astype(int).astype({'electrode_group_name': str}).values)
 
     # populate SortGroup with validated references
     if not (sgs.SortGroup & {"nwb_file_name": nwb_file_name}):
