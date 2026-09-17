@@ -129,7 +129,7 @@ def get_trial_offsets(goal_block_df):
     switch_offset = goal_block_df['trial_num'].values[0]
     goal_block_df['n_trial_since_goal_switch'] = goal_block_df['trial_num'].values - switch_offset
 
-    if complete_goal_block:
+    if not goal_block_df.loc[goal_block_df['goal_block_phase'] == 'repeat'].empty:
         found_offset = goal_block_df.loc[goal_block_df['goal_block_phase'] == 'repeat', 'trial_num'].values[0]
         goal_block_df['n_trial_since_goal_found'] = goal_block_df['trial_num'].values - found_offset
     

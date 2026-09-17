@@ -1,11 +1,10 @@
 import numpy as np
-import os
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+from scipy.stats import zscore
+import warnings
 from scipy.signal import hilbert
 from scipy.fftpack import next_fast_len
-import warnings
+import math
 from tqdm.notebook import tqdm
 import math
 from matplotlib.collections import LineCollection
@@ -16,17 +15,20 @@ from sklearn.decomposition import PCA
 
 
 import spyglass.common as sgc
-from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1
 from spyglass.lfp.analysis.v1 import LFPBandV1, LFPBandSelection
 from spyglass.lfp import LFPOutput
 from spyglass.lfp.v1 import LFPArtifactRemovedIntervalList
 import spyglass.lfp as lfp
+import spyglass.position as sgp
+from spyglass.common.common_interval import Interval
 from spyglass.common.common_filter import FirFilterParameters
 import spyglass.position as sgp
 from spyglass.common.common_interval import Interval
 
 from ripple_detection.core import gaussian_smooth
 
+from gl_spyglass.utils.interval_functions import insert_mobile_times_interval
+from gl_spyglass.custom_spyglass_tables.sleep_structure import bools_to_intervals
 from gl_spyglass.utils.common_neural_functions import validate_references
 from gl_spyglass.custom_spyglass_tables.grouped_ripple import RippleTimesGroup
 from gl_spyglass.utils.interval_functions import insert_mobile_times_interval
@@ -221,7 +223,7 @@ def load_theta_power(nwb_file_name, interval_list_name):
 
     theta_power_df.columns = ca1_electrodes
 
-    return theta_power_df
+    return theta_power_df, lfp_sampling_rate
 
 def load_ripple_times(nwb_file_name, interval_list_name, pos_interval_list_name):
 
@@ -250,6 +252,27 @@ def load_ripple_times(nwb_file_name, interval_list_name, pos_interval_list_name)
     pos_key = (sgp.v1.TrodesPosSelection() & pos_s_key).fetch1("KEY")
     pos_merge_key = (sgp.PositionOutput.merge_get_part(pos_key)).fetch1("KEY")
     pos_merge_id = pos_merge_key['merge_id']
+
+    lfp_electrode_group_name = 'good_single_elecs'
+    lfp_filter_name = 'LFP 0-400 Hz'
+    lfp_s_key = {
+        'nwb_file_name': nwb_file_name,
+        'lfp_electrode_group_name': lfp_electrode_group_name,
+        'target_interval_list_name': interval_list_name,
+        'filter_name': lfp_filter_name,
+        'filter_sampling_rate': 30_000,  # sampling rate of the data (Hz)
+        'target_sampling_rate': 1_000,  # sampling rate of the lfp output (Hz)
+    }
+    lfp_merge_id = (LFPOutput.LFPV1() & lfp_s_key).fetch1('merge_id')
+
+    lfp_sampling_rate = LFPOutput.merge_get_parent(
+        {"merge_id": lfp_merge_id}
+    ).fetch1("lfp_sampling_rate")
+
+    # select artifact detection parameters
+    artifact_params_name = 'mad_7_0.66_thresh_200ms'
+    lfp_filter_name = 'LFP 0-400 Hz'
+
     artifact_params_name = 'mad_7_0.66_thresh_200ms'
     lfp_artifact_s_key = {
         'nwb_file_name': nwb_file_name,
@@ -283,15 +306,15 @@ def load_ripple_times(nwb_file_name, interval_list_name, pos_interval_list_name)
 
     return ripple_times
 
-
-def insert_high_theta_intervals(nwb_file_name, interval_list_name):
+def insert_high_theta_intervals(nwb_file_name, interval_list_name, ripple_buffer_time=None):
+    print('inserting high theta intervals...')
 
     if "valid times" in interval_list_name:
         high_theta_interval_list_name = interval_list_name.replace(
-            "valid times", "high theta times"
+            "valid times", f"high theta times{'' if ripple_buffer_time is None else f' rip_buffer_{ripple_buffer_time}'}"
         )
     else:
-        high_theta_interval_list_name = f"{interval_list_name} high theta times"
+        high_theta_interval_list_name = f"{interval_list_name} high theta times{'' if ripple_buffer_time is None else f' rip_buffer_{ripple_buffer_time}'}"
 
     # check if this interval already exists
     if (
@@ -310,7 +333,7 @@ def insert_high_theta_intervals(nwb_file_name, interval_list_name):
 
     # load theta power
     print('loading theta power...')
-    theta_power_df = load_theta_power(nwb_file_name, interval_list_name)
+    theta_power_df, lfp_sampling_rate = load_theta_power(nwb_file_name, interval_list_name)
 
     # process theta power
     print('processing theta power...')
@@ -358,6 +381,10 @@ def insert_high_theta_intervals(nwb_file_name, interval_list_name):
     # load in and remove ripple times
     print('loading in and subtracting ripple times')
     ripple_times = load_ripple_times(nwb_file_name, interval_list_name, pos_interval_list_name)
+    if ripple_buffer_time is not None:
+        # expand ripple times to include a narrow buffer window
+        ripple_times[:, 0] = ripple_times[:, 0] - ripple_buffer_time 
+        ripple_times[:, 1] = ripple_times[:, 0] + ripple_buffer_time
     high_theta_intervals = Interval(high_theta_intervals, no_overlap=True).subtract(ripple_times).times
 
     # isolate only to intervals that are > 1s
@@ -379,6 +406,7 @@ def insert_high_theta_intervals(nwb_file_name, interval_list_name):
     return high_theta_interval_list_name, high_theta_intervals
 
 
+# Write functions that filter any data into a desired frequency band (matching exact calculations done in LFPBandV1.populate)
 def filter_data(
     timestamps,
     data,
@@ -620,8 +648,9 @@ def get_theta_phase_df(
         nwb_file_name,
         interval_list_name,
         decode_info_df,
-        phase_type='best_elec',        
+        phase_type='lfp_best_elec',        
 ):
+    print(f'getting theta phase for {phase_type}...')
     
     lfp_best_tets = {
         'pippin20210421_.nwb': 56,
@@ -670,6 +699,125 @@ def get_theta_phase_df(
 
     return theta_band_phase_df
 
+from sklearn.decomposition import PCA
+
+def find_vector(points, vector_type):
+
+    if vector_type == 'start_end':
+        # find the magnitude and direction of the endpoints-based vector
+        v_start = points[0]
+        v_end = points[-1]
+        magn = np.linalg.norm(v_end - v_start)
+        dire = math.atan2(v_end[1] - v_start[1], v_end[0] - v_start[0])
+
+    if vector_type == 'best_fit':
+        # project points into 1-dimensional space and then reconstruct into original coordinate space
+        pca = PCA(n_components=1)
+        X_recon = pca.inverse_transform(pca.fit_transform(points))
+
+        # flip so vector points start -> end
+        if np.dot(X_recon[-1] - X_recon[0], points[-1] - points[0]) < 0:
+            X_recon = X_recon[::-1]
+
+        # find the magnitude and direction of the reconstructed vector
+        v_start = X_recon[0]
+        v_end = X_recon[-1]
+        magn = np.linalg.norm(v_end - v_start)
+        dire = math.atan2(v_end[1] - v_start[1], v_end[0] - v_start[0])
+    
+    return magn, dire, v_start, v_end
+
+def get_sweep_info(df, theta_type):
+    sweep_coords = df[['mean_hpd90.0_x', 'mean_hpd90.0_y']].values
+    magn, dire, v_start, v_end = find_vector(sweep_coords, vector_type='start_end')
+    total_dist = np.sum(np.linalg.norm(sweep_coords[1:] - sweep_coords[:-1], axis=1))
+    phase_duration = df[f'{theta_type}_theta_phase_wrapped'].values[-1] - df[f'{theta_type}_theta_phase_wrapped'].values[0]
+    time_duration = df['time'].values[-1] - df['time'].values[0]
+    speed = total_dist / time_duration
+
+    start_pos = df[['pos_x', 'pos_y']].values[0]
+    start_sweep = sweep_coords[0]
+    init_offset_magn = np.linalg.norm(start_sweep - start_pos)
+    init_offset_dire = math.atan2(start_sweep[1] - start_pos[1], start_sweep[0] - start_pos[0])
+
+    df[['sweep_v_magn', 'sweep_v_dire', 'sweep_total_dist', 'sweep_phase_duration',
+        'sweep_time_duration', 'sweep_speed', 'init_offset_magn', 'init_offset_dire']] = (
+        magn, dire, total_dist, phase_duration, time_duration, speed, init_offset_magn, init_offset_dire
+    )
+
+    return df
+
+def get_next_prev_arm_coords(df):
+    pos_track_segment_ids = df['pos_track_segment_id'].unique()
+    arm_segments = pos_track_segment_ids[pos_track_segment_ids != 0]
+
+    for arm_segment in tqdm(arm_segments):
+        arm_segment_entrance = df.loc[df.loc[df['pos_track_segment_id'] == arm_segment, 'pos_linear_position'].idxmin(), ['pos_x', 'pos_y']].values
+        
+        # NOTE: this is isolated to the base area for now
+        # set next (current) arm coordinates
+        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['curr_outer'] == arm_segment), 'next_arm_x'] = arm_segment_entrance[0]
+        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['curr_outer'] == arm_segment), 'next_arm_y'] = arm_segment_entrance[1]
+
+        # set previous arm coordinates
+        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_outer'] == arm_segment), 'prev_arm_x'] = arm_segment_entrance[0]
+        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_outer'] == arm_segment), 'prev_arm_y'] = arm_segment_entrance[1]
+
+    return df
+
+def get_prev_goal_coords(df):
+    pos_track_segment_ids = df['pos_track_segment_id'].unique()
+    arm_segments = pos_track_segment_ids[pos_track_segment_ids != 0]
+
+    for arm_segment in tqdm(arm_segments):
+        arm_segment_entrance = df.loc[df.loc[df['pos_track_segment_id'] == arm_segment, 'pos_linear_position'].idxmin(), ['pos_x', 'pos_y']].values
+        
+        # NOTE: this is isolated to the base area for now
+        # set next (current) arm coordinates
+        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_goal'] == arm_segment), 'prev_goal_x'] = arm_segment_entrance[0]
+        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_goal'] == arm_segment), 'prev_goal_y'] = arm_segment_entrance[1]
+
+    return df
+
+def find_angles_between_points(A, B):
+    dx = B[:, 0] - A[:, 0]
+    dy = B[:, 1] - A[:, 1]
+    angles = np.arctan2(dy, dx)
+    return angles
+
+def calc_move_dirs(df, win_len=3):
+    # win_len is in number of time bins, where each time bin is currently 4ms (since the decoding sampling rate is 250 Hz)
+    
+    pos = df[['pos_x', 'pos_y']].values
+
+    pad_len = win_len // 2
+    pos_padded = np.pad(pos, ((pad_len, pad_len), (0, 0)), constant_values=np.nan)
+
+    windows = sliding_window_view(pos_padded, window_shape=(win_len, 2))
+
+    move_dirs = []
+
+    # windows is a 2D array, each row is one window
+    for win_pos_coords in tqdm(windows):
+        
+        if np.any(np.isnan(win_pos_coords)):
+            # if there's nans, just skip and cut off these edge cases
+            move_dirs.append(np.nan)
+            continue
+
+        _, move_dir, _, _ = find_vector(np.squeeze(win_pos_coords), vector_type='start_end')
+        move_dirs.append(move_dir)
+    
+    return move_dirs
+
+def add_move_dir(df):
+    move_dirs = calc_move_dirs(df, win_len=3)
+    df['move_dir'] = move_dirs 
+    return df
+
+def get_sweep_dir_diff(df):
+    df['sweep_dir_diff'] = np.concatenate([[np.nan], np.diff(df['sweep_v_dire'].values)])
+    return df
 
 def add_processed_theta_sweep_info(nwb_file_name, interval_list_name, decode_info_df, theta_type='mua'):
     # add euclidean mean decode error (distance)
@@ -702,7 +850,7 @@ def add_processed_theta_sweep_info(nwb_file_name, interval_list_name, decode_inf
         theta_phase_df,
         on='time',
         direction='nearest',
-        tolerance=0.0005   # max allowed mismatch (seconds)
+        tolerance=0.002   # max allowed mismatch (seconds)
     )
 
     # calculate and load in high theta intervals
@@ -826,6 +974,9 @@ def add_processed_theta_sweep_info(nwb_file_name, interval_list_name, decode_inf
     trial_values = decode_info_df.groupby(["n_trial"])["curr_outer"].first()
     trial_values_shifted = trial_values.shift(1)
     decode_info_df["prev_outer"] = decode_info_df['n_trial'].map(trial_values_shifted)
+
+    if 'prev_goal' not in decode_info_df.columns:
+        decode_info_df['prev_goal'] = float('nan')
 
     # get coordinates of the next arm, previous arm, and previous goal arm
     decode_info_df = get_next_prev_arm_coords(decode_info_df)
