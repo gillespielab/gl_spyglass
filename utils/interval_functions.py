@@ -230,23 +230,40 @@ def insert_mobile_times_interval(
         plt.show()
 
     mobile_intervals = convert_to_times(get_bool_intervals(speed_bools['speed'].values), speed_bools['time'].values)
-    mobile_durations = mobile_intervals[:, 1] - mobile_intervals[:, 0]
 
-    # Keep intervals longer than the threshold
-    mobile_intervals = mobile_intervals[mobile_durations >= time_thresh, :]
+    if len(mobile_intervals) == 0:
+        # mobile intervals are empty so don't need to go through duration thresholding
+        # insert mobile intervals into IntervalList
+        sgc.IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": new_interval_list_name,
+                "valid_times": np.asarray(mobile_intervals),
+            },
+            skip_duplicates=True,
+        )
+        print(f"Inserted new interval: {new_interval_list_name}")
 
-    # insert mobile intervals into IntervalList
-    sgc.IntervalList.insert1(
-        {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": new_interval_list_name,
-            "valid_times": np.asarray(mobile_intervals),
-        },
-        skip_duplicates=True,
-    )
-    print(f"Inserted new interval: {new_interval_list_name}")
+        return new_interval_list_name
 
-    return new_interval_list_name
+    else:
+        mobile_durations = mobile_intervals[:, 1] - mobile_intervals[:, 0]
+
+        # Keep intervals longer than the threshold
+        mobile_intervals = mobile_intervals[mobile_durations >= time_thresh, :]
+
+        # insert mobile intervals into IntervalList
+        sgc.IntervalList.insert1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": new_interval_list_name,
+                "valid_times": np.asarray(mobile_intervals),
+            },
+            skip_duplicates=True,
+        )
+        print(f"Inserted new interval: {new_interval_list_name}")
+
+        return new_interval_list_name
 
 
 def interval_list_during_trials(nwb_file_name, interval_list_name, epoch):

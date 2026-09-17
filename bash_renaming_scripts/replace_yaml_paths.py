@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-SEARCH = "/home/gl-willow/"
-REPLACE = "/mnt/"
+SEARCH = "/cumulus/anna/despereaux/raw"
+REPLACE = "/mnt/banyan/raw/anna/despereaux"
 
 
 def find_yaml_files(root: Path) -> List[Path]:

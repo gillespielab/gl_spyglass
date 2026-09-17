@@ -713,7 +713,7 @@ def compute_mobile_median_mad_across_day(nwb_file_name):
             'lfp_electrode_group_name': lfp_electrode_group_name,
             'target_interval_list_name': interval_list_name,
             'filter_name': lfp_filter_name,
-            'filter_sampling_rate': 30_000,  # sampling rate of the data (Hz)
+            'filter_sampling_rate': 20_000,  # sampling rate of the data (Hz)  # TODO: update this to automatically detect instead of assuming (since we have different sampling rates for 8arm vs 6arm now)
             'target_sampling_rate': lfp_sampling_rate,  # sampling rate of the lfp output (Hz)
         }
 
@@ -740,7 +740,7 @@ def compute_mobile_median_mad_across_day(nwb_file_name):
             'lfp_electrode_group_name': lfp_electrode_group_name,
             'target_interval_list_name': interval_list_name,
             'filter_name': lfp_filter_name,
-            'filter_sampling_rate': 30_000,  # I'm pretty sure this is the sampling rate for the original data but not sure
+            'filter_sampling_rate': 20_000,  # TODO: update this to automatically detect instead of assuming (since we have different sampling rates for 8arm vs 6arm now)
             'artifact_params_name': artifact_params_name,
         }
         artifact_removed_interval_list_name = (lfp.v1.LFPArtifactRemovedIntervalList() & lfp_artifact_s_key).fetch1('artifact_removed_interval_list_name')
