@@ -182,8 +182,31 @@ def auto_set_yticks(ax):
     if ticks[-1] < ymax:        # if the last tick is below the top
         ticks = list(ticks) + [ymax]  # add the top limit as a tick
 
+    if ticks[0] > ymin:        # if the last tick is above the bottom
+        ticks = [ymin] + list(ticks)  # add the bottom limit as a tick
+
     ax.set_yticks(ticks)         # update major ticks
-    ax.set_ylim(ymin, ticks[-1]) # ensure axis limit matches top tick
+    ax.set_ylim(ticks[0], ticks[-1]) # ensure axis limit matches top tick
+
+def auto_set_xticks(ax):
+    # autocalculate xlims and xticks, ensure that the top tick aligns with the top of the axis
+    ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', integer=False, prune=None))
+
+    plt.draw()  # force tick calculation
+
+    # Step 2: snap axis limits to include the top tick
+    ticks = ax.get_xticks()
+    xmin, xmax = ax.get_xlim()
+
+    if ticks[-1] < xmax:        # if the last tick is below the top
+        ticks = list(ticks) + [xmax]  # add the top limit as a tick
+
+    if ticks[0] > xmin:        # if the last tick is above the bottom
+        ticks = [xmin] + list(ticks)  # add the bottom limit as a tick
+
+    ax.set_xticks(ticks)         # update major ticks
+    ax.set_xlim(ticks[0], ticks[-1]) # ensure axis limit matches top tick
+
 
 def custom_set_ylim(ax, ymin, ymax):
     # autocalculate yticks based on custom ylim, ensure that the top tick aligns with the top of the axis
