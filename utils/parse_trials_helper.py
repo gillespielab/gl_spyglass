@@ -342,6 +342,9 @@ class V8TrialParser(TrialParser):
                     outerreps_times[t] = home[home >= outerreps_time][0]
             # outerreps_times = [home[home >= outerreps_time][0] for outerreps_time in outerreps_times]  
 
+        if self.key['nwb_file_name'] == 'despereaux20191124_.nwb':
+            outerreps = 15  # overwrite the detected outerreps because this epoch had a statescript code bug that caused a mismatch
+
         if "outer_reps" not in descriptors.keys():
             self.key['descriptors']['outer_reps'] = outerreps
 
@@ -805,7 +808,7 @@ class V8TrialParser(TrialParser):
     
     def __assign_outerreps(self, trials_df, outerreps):
         # use outerreps readouts to fill in outer reps for each block (this is especially important for variable outer reps!)
-        
+
         n_goal_blocks = len(trials_df['n_goal_block'].unique())
 
         if (not isinstance(outerreps, list)) & (not isinstance(outerreps, np.ndarray)):
@@ -851,13 +854,23 @@ class V8TrialParser(TrialParser):
                 continue
             assigned_outerreps = block_df['outer_reps'].values[0]
             found_outerreps = np.sum(block_df['outer_success'].values)
-            if assigned_outerreps != found_outerreps:
+
+            # add known exception for weird statescript bugs for this early set of ucsf animals
+            # if self.key['nwb_file_name'] in ['despereaux20191130_.nwb', 'despereaux20191205_.nwb', 'roquefort20191015_.nwb']:
+            if ('despereaux' in self.key['nwb_file_name']) | ('roquefort' in self.key['nwb_file_name']) | ('jaq' in self.key['nwb_file_name']) | ('montague' in self.key['nwb_file_name']):
+                assigned_outerreps = found_outerreps
+                trials_df.loc[trials_df['n_goal_block'] == goal_block, 'outer_reps'] = found_outerreps
+
+            if self.key['nwb_file_name'] == 'roquefort20191015_.nwb':
+                trials_df.loc[trials_df['n_goal_block'] == goal_block, 'outer_reps'] = 10  # hard coding this in because there were some weird lockout trial issues that resulted in only 7 rewarded trials needed instead of 10 (see behavior log)
+
+            elif assigned_outerreps != found_outerreps:
                 num_goals = self.key['descriptors']['num_goals']
                 curr_goal = block_df['goal_well'].values[0]
                 next_goal = trials_df.loc[trials_df['n_goal_block'] == goal_blocks[b + 1], 'goal_well'].values[1]
                 last_outer_well = block_df['outer_well'].values[-1]
                 print(f'WARNING: assigned outerreps ({assigned_outerreps}) != found outerreps ({found_outerreps}) for goal block {goal_block} | num_goals = {num_goals} | current goal is {curr_goal} while next goal is {next_goal} and last outerwell of curr block is {last_outer_well}')
-        
+
         return trials_df
 
     def __get_time_offset(self, sc_home_times):

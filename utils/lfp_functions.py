@@ -163,7 +163,7 @@ def single_epoch_lfp_pipeline(nwb_file_name, interval_list_name, pos_interval_li
             )
             ripple_elecs_mask = (electrodes_df['region_name'] == 'ca1')
             ripple_electrode_list = electrodes_df.loc[ripple_elecs_mask, 'electrode_id'].values
-            ripple_ref_electrode_list = electrodes_df.loc[ripple_elecs_mask, 'val_ref'].values.astype('int')
+            ripple_ref_electrode_list = np.asarray(electrodes_df.loc[ripple_elecs_mask, 'val_ref'].values.astype('int'))
 
             # cross check with the electrodes used in the lfp_electrode_group_name used to process the lfp ('good_single_elecs')
             lfp_elecs = (lfp.lfp_electrode.LFPElectrodeGroup.LFPElectrode() & 

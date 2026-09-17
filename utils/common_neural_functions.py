@@ -48,27 +48,34 @@ def validate_references(nwb_file_name, is_copy=False, verbose=False):
     ].astype("int")
     electrodes_df["bad_channel"] = electrodes_df["bad_channel"].astype("str")
 
-    # calculate can 1 vs can 2 cutoff using half the detected tetrodes
-    n_tetrodes = len(electrodes_df["electrode_group_name"].unique())
-    if (n_tetrodes != 32) & (n_tetrodes != 64):
-        raise Exception(
-            f"Counted {n_tetrodes} tetrodes, not 32 or 64... revisit the yaml."
-        )
-    can_cutoff = n_tetrodes / 2
+    # set exception for these animals who each only had 30-tetrode drives and egroups 30 and 31 were the extras that belonged to no cannula
+    nc_subjs = ['despereaux', 'jaq', 'montague', 'roquefort']
+    if any(nc_subj in nwb_file_name for nc_subj in nc_subjs):
+        n_tetrodes = 30
+        can_cutoff = n_tetrodes / 2
 
-    # assign which tetrode/electrode is in which cannula
-    electrodes_df.loc[electrodes_df["electrode_group_name"] < can_cutoff, "can"] = 1
-    electrodes_df.loc[electrodes_df["electrode_group_name"] >= can_cutoff, "can"] = 2
+        # assign which tetrode/electrode is in which cannula
+        electrodes_df.loc[electrodes_df["electrode_group_name"] < can_cutoff, "can"] = 1
+        electrodes_df.loc[(electrodes_df["electrode_group_name"] >= can_cutoff) & (electrodes_df['electrode_group_name'] < n_tetrodes), "can"] = 2
+
+    else:
+        # calculate can 1 vs can 2 cutoff using half the detected tetrodes
+        n_tetrodes = len(electrodes_df["electrode_group_name"].unique())
+
+        if (n_tetrodes != 32) & (n_tetrodes != 64):
+            raise Exception(
+                f"Counted {n_tetrodes} tetrodes, not 32 or 64... revisit the yaml."
+            )
+        
+        can_cutoff = n_tetrodes / 2
+
+        # assign which tetrode/electrode is in which cannula
+        electrodes_df.loc[electrodes_df["electrode_group_name"] < can_cutoff, "can"] = 1
+        electrodes_df.loc[electrodes_df["electrode_group_name"] >= can_cutoff, "can"] = 2
 
     # identify original_reference_electrode values (set in trodes config)
-    orig_ref_mapping = (
-        electrodes_df[["original_reference_electrode", "can"]]
-        .groupby(["original_reference_electrode", "can"])
-        .mean()
-        .reset_index()
-        .set_index("can", drop=True)
-        .to_dict()["original_reference_electrode"]
-    )
+    orig_ref_mapping = electrodes_df.groupby('can')['original_reference_electrode'].agg(lambda x: x.value_counts().idxmax()).to_dict()
+
     if verbose:
         print(f"original references mapping (cannula : electrode_id): {orig_ref_mapping}")
 
