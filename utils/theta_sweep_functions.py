@@ -73,7 +73,6 @@ def find_angles_between_points(A, B):
     angles = np.arctan2(dy, dx)
     return angles
 
-
 def find_vector(points, vector_type):
 
     if vector_type == 'start_end':
@@ -99,7 +98,6 @@ def find_vector(points, vector_type):
         dire = math.atan2(v_end[1] - v_start[1], v_end[0] - v_start[0])
     
     return magn, dire, v_start, v_end
-
 
 def calc_move_dirs(df, win_len=3):
     # win_len is in number of time bins, where each time bin is currently 4ms (since the decoding sampling rate is 250 Hz)
@@ -369,7 +367,6 @@ def insert_high_theta_intervals(nwb_file_name, interval_list_name, ripple_buffer
     for interval in mobile_intervals:
         interval_power = zscore_theta_power_smooth_df.loc[(zscore_theta_power_smooth_df.index >= interval[0]) & (zscore_theta_power_smooth_df.index < interval[1]), 'power'].values
         interval_powers.append(interval_power)
-
     mobile_power = np.concatenate(interval_powers)
 
     # find high theta intervals based on this threshold
@@ -384,7 +381,8 @@ def insert_high_theta_intervals(nwb_file_name, interval_list_name, ripple_buffer
     if ripple_buffer_time is not None:
         # expand ripple times to include a narrow buffer window
         ripple_times[:, 0] = ripple_times[:, 0] - ripple_buffer_time 
-        ripple_times[:, 1] = ripple_times[:, 0] + ripple_buffer_time
+        ripple_times[:, 1] = ripple_times[:, 1] + ripple_buffer_time
+    ripple_times = Interval(ripple_times, no_overlap=True)
     high_theta_intervals = Interval(high_theta_intervals, no_overlap=True).subtract(ripple_times).times
 
     # isolate only to intervals that are > 1s
@@ -698,122 +696,6 @@ def get_theta_phase_df(
         theta_band_phase_df = pd.DataFrame({'time': theta_band.index.values, 'theta_band': mean_theta_band_vals, 'theta_phase': mean_theta_phase})
 
     return theta_band_phase_df
-
-from sklearn.decomposition import PCA
-
-def find_vector(points, vector_type):
-
-    if vector_type == 'start_end':
-        # find the magnitude and direction of the endpoints-based vector
-        v_start = points[0]
-        v_end = points[-1]
-        magn = np.linalg.norm(v_end - v_start)
-        dire = math.atan2(v_end[1] - v_start[1], v_end[0] - v_start[0])
-
-    if vector_type == 'best_fit':
-        # project points into 1-dimensional space and then reconstruct into original coordinate space
-        pca = PCA(n_components=1)
-        X_recon = pca.inverse_transform(pca.fit_transform(points))
-
-        # flip so vector points start -> end
-        if np.dot(X_recon[-1] - X_recon[0], points[-1] - points[0]) < 0:
-            X_recon = X_recon[::-1]
-
-        # find the magnitude and direction of the reconstructed vector
-        v_start = X_recon[0]
-        v_end = X_recon[-1]
-        magn = np.linalg.norm(v_end - v_start)
-        dire = math.atan2(v_end[1] - v_start[1], v_end[0] - v_start[0])
-    
-    return magn, dire, v_start, v_end
-
-def get_sweep_info(df, theta_type):
-    sweep_coords = df[['mean_hpd90.0_x', 'mean_hpd90.0_y']].values
-    magn, dire, v_start, v_end = find_vector(sweep_coords, vector_type='start_end')
-    total_dist = np.sum(np.linalg.norm(sweep_coords[1:] - sweep_coords[:-1], axis=1))
-    phase_duration = df[f'{theta_type}_theta_phase_wrapped'].values[-1] - df[f'{theta_type}_theta_phase_wrapped'].values[0]
-    time_duration = df['time'].values[-1] - df['time'].values[0]
-    speed = total_dist / time_duration
-
-    start_pos = df[['pos_x', 'pos_y']].values[0]
-    start_sweep = sweep_coords[0]
-    init_offset_magn = np.linalg.norm(start_sweep - start_pos)
-    init_offset_dire = math.atan2(start_sweep[1] - start_pos[1], start_sweep[0] - start_pos[0])
-
-    df[['sweep_v_magn', 'sweep_v_dire', 'sweep_total_dist', 'sweep_phase_duration',
-        'sweep_time_duration', 'sweep_speed', 'init_offset_magn', 'init_offset_dire']] = (
-        magn, dire, total_dist, phase_duration, time_duration, speed, init_offset_magn, init_offset_dire
-    )
-
-    return df
-
-def get_next_prev_arm_coords(df):
-    pos_track_segment_ids = df['pos_track_segment_id'].unique()
-    arm_segments = pos_track_segment_ids[pos_track_segment_ids != 0]
-
-    for arm_segment in tqdm(arm_segments):
-        arm_segment_entrance = df.loc[df.loc[df['pos_track_segment_id'] == arm_segment, 'pos_linear_position'].idxmin(), ['pos_x', 'pos_y']].values
-        
-        # NOTE: this is isolated to the base area for now
-        # set next (current) arm coordinates
-        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['curr_outer'] == arm_segment), 'next_arm_x'] = arm_segment_entrance[0]
-        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['curr_outer'] == arm_segment), 'next_arm_y'] = arm_segment_entrance[1]
-
-        # set previous arm coordinates
-        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_outer'] == arm_segment), 'prev_arm_x'] = arm_segment_entrance[0]
-        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_outer'] == arm_segment), 'prev_arm_y'] = arm_segment_entrance[1]
-
-    return df
-
-def get_prev_goal_coords(df):
-    pos_track_segment_ids = df['pos_track_segment_id'].unique()
-    arm_segments = pos_track_segment_ids[pos_track_segment_ids != 0]
-
-    for arm_segment in tqdm(arm_segments):
-        arm_segment_entrance = df.loc[df.loc[df['pos_track_segment_id'] == arm_segment, 'pos_linear_position'].idxmin(), ['pos_x', 'pos_y']].values
-        
-        # NOTE: this is isolated to the base area for now
-        # set next (current) arm coordinates
-        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_goal'] == arm_segment), 'prev_goal_x'] = arm_segment_entrance[0]
-        df.loc[(df['pos_track_segment_id'] == 0) & (df['trial_direction'] == 'outbound') & (df['prev_goal'] == arm_segment), 'prev_goal_y'] = arm_segment_entrance[1]
-
-    return df
-
-def find_angles_between_points(A, B):
-    dx = B[:, 0] - A[:, 0]
-    dy = B[:, 1] - A[:, 1]
-    angles = np.arctan2(dy, dx)
-    return angles
-
-def calc_move_dirs(df, win_len=3):
-    # win_len is in number of time bins, where each time bin is currently 4ms (since the decoding sampling rate is 250 Hz)
-    
-    pos = df[['pos_x', 'pos_y']].values
-
-    pad_len = win_len // 2
-    pos_padded = np.pad(pos, ((pad_len, pad_len), (0, 0)), constant_values=np.nan)
-
-    windows = sliding_window_view(pos_padded, window_shape=(win_len, 2))
-
-    move_dirs = []
-
-    # windows is a 2D array, each row is one window
-    for win_pos_coords in tqdm(windows):
-        
-        if np.any(np.isnan(win_pos_coords)):
-            # if there's nans, just skip and cut off these edge cases
-            move_dirs.append(np.nan)
-            continue
-
-        _, move_dir, _, _ = find_vector(np.squeeze(win_pos_coords), vector_type='start_end')
-        move_dirs.append(move_dir)
-    
-    return move_dirs
-
-def add_move_dir(df):
-    move_dirs = calc_move_dirs(df, win_len=3)
-    df['move_dir'] = move_dirs 
-    return df
 
 def get_sweep_dir_diff(df):
     df['sweep_dir_diff'] = np.concatenate([[np.nan], np.diff(df['sweep_v_dire'].values)])
